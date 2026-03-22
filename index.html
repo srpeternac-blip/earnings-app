@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Earnings Calendar</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0e17; --surface: #111827; --surface2: #1a2236;
+    --border: #1e2d45; --accent: #00d4ff; --accent2: #7c3aed;
+    --text: #e2e8f0; --muted: #4b6380;
+    --bmo: #f59e0b; --amc: #a78bfa; --dmh: #34d399; --red: #f87171;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'DM Sans', sans-serif; min-height: 100vh; }
+  body::before {
+    content: ''; position: fixed; inset: 0;
+    background-image: linear-gradient(rgba(0,212,255,0.03) 1px,transparent 1px),linear-gradient(90deg,rgba(0,212,255,0.03) 1px,transparent 1px);
+    background-size: 40px 40px; pointer-events: none; z-index: 0;
+  }
+  .app { display: flex; min-height: 100vh; position: relative; z-index: 1; }
+
+  .sidebar { width: 220px; flex-shrink: 0; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 28px 0 20px; position: fixed; top: 0; left: 0; bottom: 0; }
+  .sidebar-logo { padding: 0 20px 24px; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
+  .sidebar-logo h1 { font-family: 'Space Mono', monospace; font-size: 13px; font-weight: 700; color: var(--accent); line-height: 1.4; }
+  .sidebar-logo p { font-size: 11px; color: var(--muted); margin-top: 3px; }
+  .nav-item { display: flex; align-items: center; gap: 11px; padding: 11px 20px; cursor: pointer; font-size: 13px; font-weight: 500; color: var(--muted); transition: all 0.15s; border-left: 3px solid transparent; user-select: none; }
+  .nav-item:hover { color: var(--text); background: rgba(255,255,255,0.03); }
+  .nav-item.active { color: var(--accent); border-left-color: var(--accent); background: rgba(0,212,255,0.05); }
+  .nav-icon { font-size: 15px; width: 20px; text-align: center; }
+  .nav-badge { margin-left: auto; font-size: 10px; font-weight: 700; border-radius: 20px; padding: 1px 7px; background: var(--surface2); color: var(--muted); }
+  .sidebar-footer { margin-top: auto; padding: 16px 20px 0; border-top: 1px solid var(--border); }
+  .sidebar-footer p { font-size: 10px; color: var(--muted); line-height: 1.6; }
+
+  .main { margin-left: 220px; flex: 1; padding: 36px 32px 60px; max-width: 860px; }
+  .page { display: none; }
+  .page.active { display: block; animation: fadeUp 0.22s ease both; }
+  @keyframes fadeUp { from{opacity:0;transform:translateY(7px)} to{opacity:1;transform:translateY(0)} }
+  .page-header { margin-bottom: 28px; }
+  .page-header h2 { font-family: 'Space Mono', monospace; font-size: 18px; font-weight: 700; color: var(--text); }
+  .page-header p { font-size: 13px; color: var(--muted); margin-top: 5px; }
+
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px 22px; margin-bottom: 14px; }
+  .card-label { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px; }
+
+  .btn { border: none; border-radius: 8px; padding: 10px 20px; font-family: 'DM Sans', sans-serif; font-size: 13px; font-weight: 700; cursor: pointer; transition: opacity 0.2s, transform 0.1s; white-space: nowrap; }
+  .btn:hover:not(:disabled) { opacity: 0.85; transform: translateY(-1px); }
+  .btn:disabled { opacity: 0.35; cursor: not-allowed; transform: none; }
+  .btn-primary { background: linear-gradient(135deg, var(--accent), #0090b8); color: #001a24; }
+  .btn-ghost { background: var(--surface2); color: var(--muted); border: 1px solid var(--border); font-size: 12px; padding: 8px 14px; }
+
+  .status-pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; margin-top: 9px; min-height: 20px; }
+  .status-pill.ok { color: var(--dmh); }
+  .status-pill.err { color: var(--red); }
+  .status-pill.loading { color: var(--accent); }
+
+  .config-row { display: flex; justify-content: space-between; align-items: center; padding: 11px 0; border-bottom: 1px solid var(--border); }
+  .config-row:last-child { border-bottom: none; }
+  .config-label { font-size: 13px; color: var(--text); }
+  .badge-ok { background: rgba(52,211,153,0.12); color: var(--dmh); font-size: 11px; font-weight: 600; border-radius: 20px; padding: 3px 10px; }
+  .badge-no { background: rgba(248,113,113,0.1); color: var(--red); font-size: 11px; font-weight: 600; border-radius: 20px; padding: 3px 10px; }
+
+  .cartera-stats { display: flex; gap: 16px; margin-bottom: 16px; }
+  .stat-box { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 18px; flex: 1; }
+  .stat-val { font-family: 'Space Mono', monospace; font-size: 22px; font-weight: 700; color: var(--accent); }
+  .stat-lbl { font-size: 11px; color: var(--muted); margin-top: 3px; }
+  .ticker-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px,1fr)); gap: 8px; }
+  .ticker-chip { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 9px 12px; display: flex; align-items: center; gap: 8px; }
+  .ticker-chip:hover { border-color: var(--muted); }
+  .chip-symbol { font-family: 'Space Mono', monospace; font-size: 12px; font-weight: 700; color: var(--accent); }
+  .chip-idx { font-size: 10px; color: var(--muted); margin-left: auto; }
+
+  .progress-bar-wrap { background: var(--surface2); border-radius: 8px; height: 6px; overflow: hidden; margin: 12px 0 6px; }
+  .progress-bar-fill { height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent2)); border-radius: 8px; transition: width 0.3s; }
+  .progress-label { font-size: 11px; color: var(--muted); }
+
+  .search-bar-row { display: flex; gap: 12px; margin-bottom: 8px; align-items: center; }
+  .search-info { font-size: 12px; color: var(--muted); }
+  .loading-bar { height: 2px; background: var(--border); border-radius: 2px; overflow: hidden; margin: 6px 0 18px; opacity: 0; transition: opacity 0.3s; }
+  .loading-bar.active { opacity: 1; }
+  .loading-bar-fill { height: 100%; background: linear-gradient(90deg,var(--accent),var(--accent2)); animation: loadAnim 2s ease-in-out infinite; }
+  @keyframes loadAnim { 0%{width:0%;margin-left:0%} 50%{width:60%;margin-left:20%} 100%{width:0%;margin-left:100%} }
+
+  .week-section { margin-bottom: 14px; }
+  .week-toggle { width: 100%; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 15px 20px; display: flex; align-items: center; justify-content: space-between; cursor: pointer; transition: border-color 0.15s; }
+  .week-toggle:hover { border-color: var(--muted); }
+  .week-toggle.open { border-color: var(--accent); background: rgba(0,212,255,0.04); border-radius: 10px 10px 0 0; border-bottom-color: transparent; }
+  .week-toggle-title { font-size: 14px; font-weight: 700; color: var(--text); }
+  .week-toggle-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .week-count { font-size: 11px; font-weight: 700; border-radius: 20px; padding: 2px 10px; }
+  .week-count.has { background: var(--accent2); color: white; }
+  .week-count.empty { background: var(--surface2); color: var(--muted); }
+  .chevron { font-size: 11px; color: var(--muted); transition: transform 0.2s; margin-left: 10px; }
+  .week-toggle.open .chevron { transform: rotate(180deg); }
+  .week-body { background: var(--surface); border: 1px solid var(--accent); border-top: none; border-radius: 0 0 10px 10px; overflow: hidden; display: none; }
+  .week-body.open { display: block; }
+  .day-block { border-bottom: 1px solid var(--border); }
+  .day-block:last-of-type { border-bottom: none; }
+  .day-row { display: flex; align-items: center; padding: 11px 20px; gap: 14px; min-height: 48px; }
+  .day-name-col { font-family: 'Space Mono', monospace; font-size: 12px; font-weight: 700; color: var(--text); width: 96px; flex-shrink: 0; display: flex; align-items: center; gap: 7px; }
+  .day-name-col.today-col { color: var(--accent); }
+  .today-dot { background: var(--accent); color: #001a24; font-size: 9px; font-weight: 700; border-radius: 20px; padding: 1px 6px; }
+  .day-date-col { font-size: 11px; color: var(--muted); width: 58px; flex-shrink: 0; }
+  .day-companies { display: flex; flex-wrap: wrap; gap: 7px; flex: 1; align-items: center; }
+  .day-empty { font-size: 12px; color: var(--muted); font-style: italic; }
+  .earn-chip { display: flex; align-items: center; gap: 6px; background: var(--bg); border: 1px solid var(--border); border-radius: 7px; padding: 5px 10px; }
+  .earn-chip:hover { border-color: var(--muted); }
+  .earn-ticker { font-family: 'Space Mono', monospace; font-size: 11px; font-weight: 700; color: var(--accent); }
+  .earn-time { font-size: 10px; font-weight: 600; border-radius: 20px; padding: 2px 7px; }
+  .bmo { color: var(--bmo); background: rgba(245,158,11,0.12); }
+  .amc { color: var(--amc); background: rgba(167,139,250,0.12); }
+  .dmh { color: var(--dmh); background: rgba(52,211,153,0.12); }
+  .unk { color: var(--muted); background: rgba(75,99,128,0.12); }
+  .week-legend { display: flex; gap: 16px; flex-wrap: wrap; padding: 11px 20px; background: var(--surface2); border-top: 1px solid var(--border); }
+  .legend-item { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); }
+  .dot { width: 7px; height: 7px; border-radius: 50%; }
+
+  .coming-soon { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 80px 20px; text-align: center; background: var(--surface); border: 1px dashed var(--border); border-radius: 14px; }
+  .coming-soon .icon { font-size: 48px; margin-bottom: 16px; opacity: 0.4; }
+  .coming-soon h3 { font-family: 'Space Mono', monospace; font-size: 15px; color: var(--muted); margin-bottom: 8px; }
+  .coming-soon p { font-size: 13px; color: var(--muted); opacity: 0.6; max-width: 300px; line-height: 1.6; }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <nav class="sidebar">
+    <div class="sidebar-logo">
+      <h1>// EARNINGS<br>CALENDAR</h1>
+      <p id="sideWeek">—</p>
+    </div>
+    <div class="nav-item active" onclick="goTo('cartera')"    id="nav-cartera">   <span class="nav-icon">📊</span> Mi Cartera</div>
+    <div class="nav-item"        onclick="goTo('resultados')" id="nav-resultados"><span class="nav-icon">📅</span> Resultados</div>
+    <div class="nav-item"        onclick="goTo('insiders')"   id="nav-insiders">  <span class="nav-icon">🔍</span> Insiders <span class="nav-badge">Próximo</span></div>
+    <div class="sidebar-footer"><p>Datos: Yahoo Finance · Fuente gratuita · Verifica con tu bróker</p></div>
+  </nav>
+
+  <main class="main">
+
+    <!-- ══ CARTERA ══ -->
+    <div class="page active" id="page-cartera">
+      <div class="page-header">
+        <h2>Mi Cartera</h2>
+        <p>Sincronizada desde Google Sheets</p>
+      </div>
+      <div class="cartera-stats">
+        <div class="stat-box"><div class="stat-val" id="statTotal">—</div><div class="stat-lbl">Empresas en cartera</div></div>
+        <div class="stat-box"><div class="stat-val" id="statTime">—</div><div class="stat-lbl">Última sincronización</div></div>
+      </div>
+      <div class="card">
+        <div class="card-label">Tickers detectados</div>
+        <div class="ticker-grid" id="tickerGrid"><p style="color:var(--muted);font-size:13px">Cargando desde Google Sheets...</p></div>
+        <div class="status-pill loading" id="sheetStatus" style="margin-top:14px">⏳ Conectando con Google Sheets...</div>
+        <div style="margin-top:12px">
+          <button class="btn btn-ghost" onclick="loadSheet()">↻ Recargar cartera</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ RESULTADOS ══ -->
+    <div class="page" id="page-resultados">
+      <div class="page-header">
+        <h2>Resultados</h2>
+        <p id="resultsSubtitle">—</p>
+      </div>
+
+      <div class="search-bar-row">
+        <button class="btn btn-primary" id="btnSearch" onclick="fetchEarnings()">▶ BUSCAR EARNINGS</button>
+        <span class="search-info" id="searchInfo">Pulsa para consultar el calendario de ambas semanas</span>
+      </div>
+
+      <!-- Progress -->
+      <div id="progressWrap" style="display:none;margin-bottom:16px">
+        <div class="progress-bar-wrap"><div class="progress-bar-fill" id="progressFill" style="width:0%"></div></div>
+        <div class="progress-label" id="progressLabel">Consultando tickers...</div>
+      </div>
+
+      <div class="week-section">
+        <div class="week-toggle" id="toggleCurrent" onclick="toggleWeek('Current')">
+          <div><div class="week-toggle-title">📅 Semana actual</div><div class="week-toggle-sub" id="subCurrent">—</div></div>
+          <div style="display:flex;align-items:center"><span class="week-count empty" id="countCurrent">—</span><span class="chevron">▼</span></div>
+        </div>
+        <div class="week-body" id="bodyCurrent"><div style="padding:18px 20px;color:var(--muted);font-size:13px">Pulsa "Buscar earnings" para cargar los datos.</div></div>
+      </div>
+
+      <div class="week-section">
+        <div class="week-toggle" id="toggleNext" onclick="toggleWeek('Next')">
+          <div><div class="week-toggle-title">📅 Semana siguiente</div><div class="week-toggle-sub" id="subNext">—</div></div>
+          <div style="display:flex;align-items:center"><span class="week-count empty" id="countNext">—</span><span class="chevron">▼</span></div>
+        </div>
+        <div class="week-body" id="bodyNext"><div style="padding:18px 20px;color:var(--muted);font-size:13px">Pulsa "Buscar earnings" para cargar los datos.</div></div>
+      </div>
+    </div>
+
+    <!-- ══ INSIDERS ══ -->
+    <div class="page" id="page-insiders">
+      <div class="page-header"><h2>Insiders</h2><p>Movimientos de insiders de tu cartera</p></div>
+      <div class="coming-soon">
+        <div class="icon">🔍</div>
+        <h3>Próximamente</h3>
+        <p>Aquí podrás ver las compras y ventas de insiders de las empresas de tu cartera.</p>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<script>
+const SHEET_CSV = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSXSofvMaT7bYXduO3ywx6Pg5q-cZccTc2GcitfKbv9pvqaDIW_0xR2RHamWwt1h6KVxpf5Vm0EwLe-/pub?output=csv';
+const DAYS_ES   = ['Lunes','Martes','Miércoles','Jueves','Viernes'];
+let tickers = [];
+
+// ── Week helpers ──
+function getWeekDates(offset = 0) {
+  const today = new Date(), day = today.getDay();
+  const mon = new Date(today);
+  mon.setDate(today.getDate() - (day === 0 ? 6 : day - 1) + offset * 7);
+  return Array.from({length:5}, (_,i) => { const d = new Date(mon); d.setDate(mon.getDate()+i); return d; });
+}
+function fmtES(d)  { return d.toLocaleDateString('es-ES',{day:'2-digit',month:'short'}); }
+function fmtTime() { return new Date().toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'}); }
+function isToday(d){ return d.toDateString() === new Date().toDateString(); }
+function toISO(d)  { return d.toISOString().split('T')[0]; }
+
+const currentWeek = getWeekDates(0);
+const nextWeek    = getWeekDates(1);
+
+// All valid ISO dates for both weeks (for quick lookup)
+const validDates = new Set([...currentWeek, ...nextWeek].map(toISO));
+
+document.getElementById('sideWeek').textContent    = `${fmtES(currentWeek[0])} — ${fmtES(currentWeek[4])}`;
+document.getElementById('subCurrent').textContent  = `${fmtES(currentWeek[0])} — ${fmtES(currentWeek[4])}`;
+document.getElementById('subNext').textContent     = `${fmtES(nextWeek[0])} — ${fmtES(nextWeek[4])}`;
+document.getElementById('resultsSubtitle').textContent = `Semana del ${fmtES(currentWeek[0])} · Semana del ${fmtES(nextWeek[0])}`;
+
+function goTo(page) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById('page-'+page).classList.add('active');
+  document.getElementById('nav-'+page).classList.add('active');
+}
+
+// ── Load sheet on startup ──
+window.addEventListener('load', loadSheet);
+
+async function loadSheet() {
+  const el = document.getElementById('sheetStatus');
+  el.className = 'status-pill loading'; el.textContent = '⏳ Conectando con Google Sheets...';
+  try {
+    const res = await fetch(SHEET_CSV + '&t=' + Date.now());
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const csv = await res.text();
+    const parsed = parseCSV(csv);
+    if (!parsed.length) throw new Error('No se encontraron tickers.');
+    tickers = parsed;
+    el.className = 'status-pill ok';
+    el.textContent = `✓ ${tickers.length} tickers cargados · ${fmtTime()}`;
+    document.getElementById('statTotal').textContent = tickers.length;
+    document.getElementById('statTime').textContent  = fmtTime();
+    renderTickerGrid();
+  } catch(e) {
+    el.className = 'status-pill err';
+    el.textContent = `⚠️ Error al cargar Sheet: ${e.message}`;
+  }
+}
+
+function parseCSV(csv) {
+  const lines = csv.trim().split('\n');
+  if (!lines.length) return [];
+  const rows = lines.map(l => l.split(',').map(c => c.replace(/^"|"$/g,'').trim().toUpperCase()));
+  const colCount = Math.max(...rows.map(r => r.length));
+  let bestCol = 0, bestScore = 0;
+  for (let col = 0; col < colCount; col++) {
+    let score = 0;
+    rows.forEach((row, ri) => { if (ri > 0 && /^[A-Z]{1,5}$/.test(row[col]||'')) score++; });
+    if (score > bestScore) { bestScore = score; bestCol = col; }
+  }
+  const set = new Set();
+  rows.forEach((row, ri) => { if (ri > 0 && /^[A-Z]{1,5}$/.test(row[bestCol]||'')) set.add(row[bestCol]); });
+  return [...set];
+}
+
+function renderTickerGrid() {
+  const grid = document.getElementById('tickerGrid');
+  grid.innerHTML = '';
+  tickers.forEach((t,i) => {
+    const chip = document.createElement('div');
+    chip.className = 'ticker-chip';
+    chip.innerHTML = `<span class="chip-symbol">${t}</span><span class="chip-idx">#${i+1}</span>`;
+    grid.appendChild(chip);
+  });
+}
+
+// ── Toggle ──
+function toggleWeek(which) {
+  const t = document.getElementById('toggle'+which);
+  const b = document.getElementById('body'+which);
+  b.classList.toggle('open', t.classList.toggle('open'));
+}
+
+// ── Fetch earnings from Yahoo Finance (free, no API key) ──
+async function fetchEarnings() {
+  if (!tickers.length) { document.getElementById('searchInfo').textContent = '⚠️ Carga tu cartera primero.'; return; }
+
+  setBusy(true);
+  document.getElementById('searchInfo').textContent = `Consultando ${tickers.length} tickers en Yahoo Finance...`;
+  document.getElementById('progressWrap').style.display = 'block';
+
+  const results = [];
+  let done = 0;
+
+  for (const ticker of tickers) {
+    try {
+      const data = await fetchYahooEarnings(ticker);
+      if (data) results.push(data);
+    } catch(e) { /* skip failed tickers */ }
+    done++;
+    const pct = Math.round((done / tickers.length) * 100);
+    document.getElementById('progressFill').style.width  = pct + '%';
+    document.getElementById('progressLabel').textContent = `${done}/${tickers.length} tickers consultados...`;
+    // Small delay to avoid rate limiting
+    await sleep(120);
+  }
+
+  document.getElementById('progressWrap').style.display = 'none';
+
+  // Filter to current and next week only
+  const curr = results.filter(r => currentWeek.some(d => toISO(d) === r.date));
+  const next  = results.filter(r => nextWeek.some(d => toISO(d) === r.date));
+
+  renderWeek('Current', curr, currentWeek);
+  renderWeek('Next',    next, nextWeek);
+
+  ['Current','Next'].forEach(w => {
+    document.getElementById('toggle'+w).classList.add('open');
+    document.getElementById('body'+w).classList.add('open');
+  });
+
+  const total = curr.length + next.length;
+  document.getElementById('searchInfo').textContent = total === 0
+    ? '✓ Ninguna empresa de tu cartera presenta earnings estas dos semanas.'
+    : `✓ ${curr.length} earnings esta semana · ${next.length} la próxima`;
+
+  setBusy(false);
+}
+
+async function fetchYahooEarnings(ticker) {
+  const url = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${ticker}?modules=calendarEvents&corsDomain=finance.yahoo.com&formatted=false`;
+  const res  = await fetch(url, { headers: { 'Accept': 'application/json' } });
+  if (!res.ok) return null;
+  const json = await res.json();
+  const cal  = json?.quoteSummary?.result?.[0]?.calendarEvents;
+  if (!cal) return null;
+
+  // earningsDate is an array of timestamps; take the first upcoming one
+  const dates = cal.earnings?.earningsDate;
+  if (!dates || !dates.length) return null;
+
+  // Find the date that falls within our two-week window
+  for (const entry of dates) {
+    const ts   = entry.raw || entry;
+    const date = new Date(ts * 1000);
+    const iso  = toISO(date);
+    if (validDates.has(iso)) {
+      // Yahoo doesn't always provide BMO/AMC reliably, mark as unknown
+      return { ticker, date: iso, time: '?' };
+    }
+  }
+  return null;
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+function renderWeek(which, items, weekDates) {
+  const countEl = document.getElementById('count'+which);
+  const bodyEl  = document.getElementById('body'+which);
+  countEl.textContent = `${items.length} empresa${items.length!==1?'s':''}`;
+  countEl.className   = `week-count ${items.length>0?'has':'empty'}`;
+  const byDate = {};
+  items.forEach(it => { if (!byDate[it.date]) byDate[it.date]=[]; byDate[it.date].push(it); });
+  const TC = { BMO:{label:'PRE',cls:'bmo'}, AMC:{label:'POST',cls:'amc'}, DMH:{label:'DMH',cls:'dmh'}, '?':{label:'?',cls:'unk'} };
+  let html = '';
+  weekDates.forEach((date, i) => {
+    const key=toISO(date), dayItems=byDate[key]||[], today=isToday(date);
+    const comps = dayItems.length
+      ? dayItems.map(it => { const tc=TC[it.time]||TC['?']; return `<div class="earn-chip"><span class="earn-ticker">${it.ticker}</span><span class="earn-time ${tc.cls}">${tc.label}</span></div>`; }).join('')
+      : `<span class="day-empty">—</span>`;
+    html += `<div class="day-block"><div class="day-row">
+      <div class="day-name-col${today?' today-col':''}">${DAYS_ES[i]}${today?'<span class="today-dot">HOY</span>':''}</div>
+      <div class="day-date-col">${fmtES(date)}</div>
+      <div class="day-companies">${comps}</div>
+    </div></div>`;
+  });
+  html += `<div class="week-legend">
+    <div class="legend-item"><div class="dot" style="background:var(--bmo)"></div>Pre-mercado</div>
+    <div class="legend-item"><div class="dot" style="background:var(--amc)"></div>Post-mercado</div>
+    <div class="legend-item"><div class="dot" style="background:var(--dmh)"></div>Durante sesión</div>
+    <div class="legend-item"><div class="dot" style="background:var(--muted)"></div>Sin confirmar</div>
+  </div>`;
+  bodyEl.innerHTML = html;
+}
+
+function setBusy(b) {
+  document.getElementById('btnSearch').disabled    = b;
+  document.getElementById('btnSearch').textContent = b ? '⏳ Consultando...' : '▶ BUSCAR EARNINGS';
+}
+</script>
+</body>
+</html>
