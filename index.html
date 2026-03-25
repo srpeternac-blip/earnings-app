@@ -254,35 +254,34 @@ const DAYS_ES = ['Lunes','Martes','Miércoles','Jueves','Viernes'];
 const XMAP = {'lon':'.L','lse':'.L','epa':'.PA','ams':'.AS','bru':'.BR','asx':'.AX','tse':'.TO','tsx':'.TO','cve':'.V','bit':'.MI','xetr':'.DE','fra':'.DE','bme':'.MC','swx':'.SW','hkex':'.HK','tyo':'.T','nse':'.NS','bse':'.BO'};
 
 
-// --- NUEVAS FUNCIONES DE RED ESTRICTAS ---
+// --- NUEVAS FUNCIONES ESTRICTAS DE RED ---
 
-// 1. Conexión específica para NASDAQ (Requiere JSON puro)
+// 1. Fetch estricto para JSON (Earnings de NASDAQ)
 async function fetchNasdaqJson(dateISO) {
   const url = `https://api.nasdaq.com/api/calendar/earnings?date=${dateISO}`;
-  const proxies = [
+  const proxiesJson = [
     u => `https://corsproxy.io/?${encodeURIComponent(u)}`,
-    u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
-    u => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`
+    u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`
   ];
   
   let lastErr = '';
-  for (const proxyFn of proxies) {
+  for (const proxyFn of proxiesJson) {
     try {
       const res = await fetch(proxyFn(url), { headers: { 'Accept': 'application/json' }});
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const text = await res.text();
-      const json = JSON.parse(text); // Si el proxy devuelve un error en HTML, esto falla y salta al catch
-      if (json && json.data) return json; // Verificación estricta del formato de NASDAQ
+      const json = JSON.parse(text); 
+      if (json && json.data) return json; 
     } catch (e) {
       lastErr = e.message;
     }
   }
-  throw new Error(`Los proxies bloquearon la consulta. Detalle: ${lastErr}`);
+  throw new Error(`Error en proxies: ${lastErr}`);
 }
 
-// 2. Conexión específica para OpenInsider (Extrae HTML saltando bloqueos)
+// 2. Fetch estricto para HTML (OpenInsider)
 async function fetchOpenInsiderHtml(oiUrl) {
-  // Estrategia A: Usar AllOrigins en modo Wrapper (Devuelve un JSON con el HTML dentro. Es la forma más fiable de leer webs HTTP antiguas).
+  // Estrategia A: AllOrigins en modo JSON (Carga todo el HTML y lo encapsula en una variable segura)
   try {
     const url1 = `https://api.allorigins.win/get?url=${encodeURIComponent(oiUrl)}`;
     const res1 = await fetch(url1);
@@ -292,7 +291,7 @@ async function fetchOpenInsiderHtml(oiUrl) {
     }
   } catch(e) {}
 
-  // Estrategia B: Fallback a corsproxy
+  // Estrategia B: corsproxy simple como respaldo
   try {
     const url2 = `https://corsproxy.io/?${encodeURIComponent(oiUrl)}`;
     const res2 = await fetch(url2);
@@ -300,9 +299,8 @@ async function fetchOpenInsiderHtml(oiUrl) {
     if (text2.includes('tinytable')) return text2;
   } catch(e) {}
   
-  throw new Error("Conexión rechazada por el servidor destino o los proxies.");
+  throw new Error("Conexión rechazada por OpenInsider o bloqueada por los proxies.");
 }
-
 
 // --- UTILIDADES ---
 function toYahoo(raw) {
@@ -421,8 +419,226 @@ async function fetchEarnings() {
 
   const allDates = [...CW, ...NW];
   
-  // Consulta paralela utilizando la nueva función estricta
   const settled = await Promise.allSettled(allDates.map(d => {
     const dISO = toISO(d);
     return fetchNasdaqJson(dISO)
-      .then(json => (json?.data?.rows || []).flatMap(
+      .then(json => (json?.data?.rows || []).flatMap(row => {
+        const t = (row.symbol||'').toUpperCase().trim();
+        if(!t) return [];
+        const comp = lookup.get(t) || lookup.get(t.split('.')[0]);
+        if(!comp) return [];
+        
+        let timeLabel = 'Horario sin confirmar', timeClass = 'unk';
+        const rt = (row.time||'').toLowerCase();
+        
+        if(rt.includes('before') || rt.includes('bmo') || rt.includes('pre')) { 
+          timeLabel = 'Pre-mercado'; timeClass = 'bmo'; 
+        }
+        else if(rt.includes('after') || rt.includes('amc') || rt.includes('post')) { 
+          timeLabel = 'Post-mercado'; timeClass = 'amc'; 
+        }
+        else if(rt.includes('during') || rt.includes('dmh')) { 
+          timeLabel = 'Durante sesión'; timeClass = 'dmh'; 
+        }
+        
+        return [{ ticker: comp.yahooTicker, name: comp.name, date: dISO, timeLabel, timeClass }];
+      }));
+  }));
+
+  const results = [];
+  let errorCount = 0;
+  let lastErrorMsg = '';
+
+  settled.forEach(r => { 
+    if(r.status === 'fulfilled') {
+      results.push(...r.value); 
+    } else {
+      errorCount++;
+      lastErrorMsg = r.reason.message;
+    }
+  });
+
+  if (errorCount === allDates.length) {
+    document.getElementById('searchInfo').innerHTML = `<span style="color:var(--red)">⚠️ Fallo total de conexión: ${lastErrorMsg}</span>`;
+    btn.disabled = false; btn.textContent = '▶ BUSCAR EARNINGS';
+    return;
+  }
+
+  const seen = new Set();
+  const unique = results.filter(r => { if(seen.has(r.ticker)) return false; seen.add(r.ticker); return true; });
+  unique.sort((a,b) => a.name.localeCompare(b.name));
+
+  const curr = unique.filter(r => CW.some(d => toISO(d) === r.date));
+  const next = unique.filter(r => NW.some(d => toISO(d) === r.date));
+
+  renderWeek('Current', curr, CW);
+  renderWeek('Next', next, NW);
+  
+  ['Current','Next'].forEach(w => {
+    document.getElementById('toggle'+w).classList.add('open');
+    document.getElementById('body'+w).classList.add('open');
+  });
+
+  const errorTxt = errorCount > 0 ? ` (Atención: fallaron ${errorCount} días por saturación)` : '';
+  document.getElementById('searchInfo').textContent = `✓ Búsqueda completada: ${curr.length} empresas esta semana, ${next.length} la próxima.${errorTxt}`;
+  btn.disabled = false; btn.textContent = '▶ BUSCAR EARNINGS';
+}
+
+function renderWeek(which, items, weekDates) {
+  const countEl = document.getElementById('count'+which), bodyEl = document.getElementById('body'+which);
+  countEl.textContent = `${items.length} empresa${items.length !== 1 ? 's' : ''}`;
+  countEl.className = `week-count ${items.length > 0 ? 'has' : 'empty'}`;
+  
+  const byDate = {};
+  items.forEach(it => { if(!byDate[it.date]) byDate[it.date] = []; byDate[it.date].push(it); });
+  
+  let html = '';
+  weekDates.forEach((date, i) => {
+    const key = toISO(date), di = byDate[key] || [], today = isToday(date);
+    let compsHtml = '<span class="day-empty">—</span>';
+    
+    if(di.length > 0) {
+      compsHtml = di.map(it => `
+        <div class="earn-chip">
+          <div class="earn-chip-top">
+            <span class="earn-ticker">${it.ticker}</span>
+            <span class="earn-time ${it.timeClass}">${it.timeLabel}</span>
+          </div>
+          <span class="earn-name" title="${it.name}">${it.name}</span>
+        </div>
+      `).join('');
+    }
+    
+    html += `
+      <div class="day-block">
+        <div class="day-row">
+          <div class="day-name-col ${today ? 'today-col' : ''}">
+            <div class="day-name-txt">${DAYS_ES[i]} ${today ? '<span class="today-dot">HOY</span>' : ''}</div>
+            <div class="day-date-txt">${fmtES(date)}</div>
+          </div>
+          <div class="day-companies">${compsHtml}</div>
+        </div>
+      </div>
+    `;
+  });
+  bodyEl.innerHTML = html;
+}
+
+// --- INSIDERS (OpenInsider Scraper) ---
+async function fetchInsiders() {
+  if(!companies.length) { alert('Carga la cartera primero.'); return; }
+  const btn = document.getElementById('btnInsiders');
+  btn.disabled = true; btn.textContent = '⏳ EXTRAYENDO...';
+  
+  const usTickers = companies.filter(c => !c.yahooTicker.includes('.'));
+  document.getElementById('insiderInfo').textContent = `Conectando con OpenInsider para ${usTickers.length} empresas...`;
+  const container = document.getElementById('insidersContainer');
+  container.innerHTML = '';
+
+  try {
+    const chunkSize = 10;
+    const tradesByTicker = {};
+    let totalTrades = 0;
+    
+    for (let i = 0; i < usTickers.length; i += chunkSize) {
+      const chunk = usTickers.slice(i, i + chunkSize);
+      const tString = chunk.map(t => t.yahooTicker.split('.')[0]).join('%2C');
+      const oiUrl = `http://openinsider.com/screener?s=${tString}&fd=7`;
+      
+      try {
+        const html = await fetchOpenInsiderHtml(oiUrl);
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(html, 'text/html');
+        
+        const rows = doc.querySelectorAll('.tinytable tbody tr');
+        
+        rows.forEach(tr => {
+          const tds = tr.querySelectorAll('td');
+          if(tds.length < 12) return;
+          
+          const ticker = tds[3].textContent.trim().toUpperCase();
+          if(!tradesByTicker[ticker]) tradesByTicker[ticker] = [];
+          
+          const type = tds[7].textContent.trim();
+          const isSale = type.toLowerCase().includes('sale');
+          
+          tradesByTicker[ticker].push({
+            filingDate: tds[1].textContent.trim().split(' ')[0],
+            tradeDate: tds[2].textContent.trim(),
+            insider: tds[5].textContent.trim(),
+            title: tds[6].textContent.trim(),
+            typeText: isSale ? 'Venta' : 'Compra',
+            isSale: isSale,
+            price: tds[8].textContent.trim(),
+            qty: tds[9].textContent.trim(),
+            value: tds[12].textContent.trim()
+          });
+          totalTrades++;
+        });
+      } catch (chunkError) {
+        console.warn(`Error procesando lote ${i}:`, chunkError);
+      }
+    }
+
+    const activeTickers = Object.keys(tradesByTicker);
+    
+    if(activeTickers.length === 0) {
+      container.innerHTML = `<div class="card"><p style="color:var(--muted)">No se encontraron movimientos en OpenInsider durante los últimos 7 días para las empresas consultadas.</p></div>`;
+      document.getElementById('insiderInfo').textContent = `✓ Búsqueda completada. Sin movimientos recientes.`;
+    } else {
+      document.getElementById('insiderInfo').textContent = `✓ Búsqueda completada: ${totalTrades} movimientos encontrados en ${activeTickers.length} empresas.`;
+      
+      activeTickers.forEach(ticker => {
+        const comp = companies.find(c => base(c.yahooTicker) === ticker);
+        const compName = comp ? comp.name : ticker;
+        const trades = tradesByTicker[ticker];
+        
+        const div = document.createElement('div');
+        div.className = 'insider-card';
+        let tHtml = `
+          <div class="insider-card-header">
+            <span class="ins-ticker">${ticker}</span>
+            <span class="ins-company">${compName}</span>
+            <span class="ins-badge">${trades.length} mov.</span>
+          </div>
+          <table class="ins-table">
+            <thead><tr><th>Fecha Form.</th><th>Fecha Op.</th><th>Insider</th><th>Cargo</th><th>Operación</th><th>Precio</th><th>Acciones</th><th>Valor</th></tr></thead>
+            <tbody>
+        `;
+        
+        trades.forEach(t => {
+          tHtml += `
+            <tr>
+              <td class="ins-mono">${t.filingDate}</td>
+              <td class="ins-mono">${t.tradeDate}</td>
+              <td><b>${t.insider}</b></td>
+              <td style="color:var(--muted); font-size:12px; max-width:150px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${t.title}">${t.title}</td>
+              <td class="${t.isSale ? 'ins-sell' : 'ins-buy'}">${t.isSale ? '▼' : '▲'} ${t.typeText}</td>
+              <td class="ins-mono">${t.price}</td>
+              <td class="ins-mono">${t.qty}</td>
+              <td class="ins-mono" style="font-weight:600">${t.value}</td>
+            </tr>
+          `;
+        });
+        tHtml += `</tbody></table>`;
+        div.innerHTML = tHtml;
+        container.appendChild(div);
+      });
+    }
+
+    // Nota para las empresas no USA
+    const nonUS = companies.filter(c => c.yahooTicker.includes('.'));
+    if(nonUS.length > 0) {
+      container.innerHTML += `<div class="note-box">ℹ️ <b>Bolsas internacionales:</b> Hay ${nonUS.length} empresas (ej. ${nonUS[0].yahooTicker}) cuyas acciones no cotizan en EE.UU. OpenInsider solo rastrea movimientos reportados a la SEC estadounidense.</div>`;
+    }
+
+  } catch(err) {
+    container.innerHTML = `<div class="card" style="border-color:var(--red)"><p style="color:var(--red)">⚠️ Error al conectar con OpenInsider: ${err.message}</p></div>`;
+    document.getElementById('insiderInfo').textContent = `Error en la búsqueda.`;
+  }
+  
+  btn.disabled = false; btn.textContent = '▶ BUSCAR INSIDERS';
+}
+</script>
+</body>
+</html>
