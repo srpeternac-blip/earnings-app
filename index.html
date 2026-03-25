@@ -288,10 +288,10 @@ if (localStorage.getItem('theme') === 'dark') {
   document.getElementById('btnTheme').textContent = '☀️ Modo Claro';
 }
 
-// --- FUNCIÓN RED ESTRICTA ---
+// --- FUNCIÓN RED ESTRICTA PARA EARNINGS E INSIDERS ---
 async function fetchApiJson(url, signal) {
   const proxiesJson = [
-    u => `https://api.allorigins.win/get?url=${encodeURIComponent(u)}`, // Devuelve JSON seguro con 'contents'
+    u => `https://api.allorigins.win/get?url=${encodeURIComponent(u)}`, 
     u => `https://corsproxy.io/?${encodeURIComponent(u)}`
   ];
   let lastErr = '';
@@ -302,18 +302,16 @@ async function fetchApiJson(url, signal) {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
       
-      // Para AllOrigins
       if (json && json.contents) {
          try { return JSON.parse(json.contents); } catch(e) {}
       }
-      // Para corsproxy directo
       if (json) return json; 
     } catch (e) { lastErr = e.message; }
   }
   throw new Error(lastErr);
 }
 
-// --- UTILIDADES DECLARADAS COMO FUNCIONES ---
+// --- UTILIDADES ---
 function toYahoo(raw) {
   if(!raw) return null;
   const c = raw.trim();
@@ -376,7 +374,7 @@ function parseCSVLine(line) {
 }
 
 async function init() {
-  activeRequests.abort(); // Parar todo lo que estuviera corriendo
+  activeRequests.abort(); 
   activeRequests = new AbortController();
   const signal = activeRequests.signal;
 
@@ -414,10 +412,10 @@ async function init() {
     sortTable('name'); 
     updateChartFromCompanies();
     
-    // Disparar las tareas de forma secuencial y limpia
+    // Al usar una API sin CORS para sectores, podemos lanzar todo en paralelo sin bloquear.
+    loadSectors(signal).catch(e => {}); 
     fetchEarnings(true, signal)
       .then(() => fetchInsiders(true, signal))
-      .then(() => loadSectors(signal)) // Los sectores se cargan dinámicamente al final
       .catch(e => {
          if(e.message !== "Cancelado por el usuario") console.error(e);
       });
@@ -429,61 +427,42 @@ async function init() {
   }
 }
 
-// Búsqueda dinámica y directa a Yahoo Finance para descubrir el sector de la empresa
-async function fetchYahooSector(ticker, signal) {
-  const url = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(ticker)}?modules=assetProfile`;
-  
-  // Preferimos corsproxy para evitar el bloqueo GDPR de Yahoo en Europa
+// Búsqueda instantánea y directa al buscador público de Yahoo (No requiere proxy)
+async function fetchSectorFast(ticker, signal) {
   try {
-    if (signal && signal.aborted) return 'Cargando...';
-    const res = await fetch(`https://corsproxy.io/?${encodeURIComponent(url)}`, { signal });
-    if (res.ok) {
-      const json = await res.json();
-      if (json?.quoteSummary?.result?.[0]?.assetProfile?.sector) {
-        return json.quoteSummary.result[0].assetProfile.sector;
-      }
-    }
-  } catch(e) {}
-
-  // Respaldo
-  try {
-    if (signal && signal.aborted) return 'Cargando...';
-    const res = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(url)}`, { signal });
+    const url = `https://query2.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(ticker)}`;
+    const res = await fetch(url, { signal });
     if (res.ok) {
       const data = await res.json();
-      const json = JSON.parse(data.contents);
-      if (json?.quoteSummary?.result?.[0]?.assetProfile?.sector) {
-        return json.quoteSummary.result[0].assetProfile.sector;
+      if (data.quotes && data.quotes.length > 0) {
+        // Encontramos el ticker exacto o cogemos el primero por defecto
+        const match = data.quotes.find(q => q.symbol === ticker.toUpperCase()) || data.quotes[0];
+        return match.sectorDisp || match.sector || 'Otros';
       }
     }
   } catch(e) {}
-
-  return 'Desconocido';
+  return 'Otros';
 }
 
 async function loadSectors(signal) {
-    // Procesamos de 1 en 1 asíncronamente con pausas para no bloquear la app
-    for (let i = 0; i < companies.length; i++) {
-        if (signal && signal.aborted) return;
-        
-        const c = companies[i];
-        if (c.sector === 'Cargando...') {
-            c.sector = await fetchYahooSector(c.yahooTicker, signal);
-        }
-        
-        // Actualizamos UI después de procesar cada empresa
-        renderCarteraTable();
-        updateChartFromCompanies();
-        
-        // Retraso seguro de medio segundo entre cada petición a Yahoo
-        await new Promise(r => setTimeout(r, 500));
-    }
+  // Al no depender de proxies lentos, podemos pedir todos los sectores en paralelo al instante
+  await Promise.all(companies.map(async (c) => {
+      if (signal && signal.aborted) return;
+      if (c.sector === 'Cargando...') {
+          c.sector = await fetchSectorFast(c.yahooTicker, signal);
+      }
+  }));
+  
+  if (signal && signal.aborted) return;
+  
+  renderCarteraTable();
+  updateChartFromCompanies();
 }
 
 function updateChartFromCompanies() {
   const sectorsCount = {};
   companies.forEach(c => {
-      const sec = c.sector;
+      const sec = c.sector === 'Cargando...' ? 'Desconocido / Otros' : c.sector;
       sectorsCount[sec] = (sectorsCount[sec] || 0) + 1;
   });
   updateChart(sectorsCount);
@@ -521,7 +500,7 @@ function renderCarteraTable() {
     const tickerLink = `<a href="https://es.investing.com/pro/${base(c.yahooTicker)}" target="_blank" class="ticker-link">${c.yahooTicker}</a>`;
     
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td class="td-ticker">${tickerLink}</td><td class="td-name">${c.name}</td><td class="td-sector" style="${c.sector === 'Cargando...' ? 'color:var(--accent); font-style:italic;' : ''}">${c.sector}</td><td class="td-alerts">${alertsHtml}</td>`;
+    tr.innerHTML = `<td class="td-ticker">${tickerLink}</td><td class="td-name">${c.name}</td><td class="td-sector">${c.sector}</td><td class="td-alerts">${alertsHtml}</td>`;
     tbody.appendChild(tr);
   });
 }
@@ -685,8 +664,6 @@ async function fetchInsiders(isBackground = false, signal = activeRequests.signa
           const price = parseFloat((row.lastPrice || '0').replace(/,/g, ''));
           const totalValueNum = (shares * price) || 0;
           
-          if (totalValueNum < 1000) return; 
-
           let relevance = 'Media';
           let relColor = 'var(--bmo)';
           if (totalValueNum >= 100000) { relevance = 'Considerable'; relColor = 'var(--accent)'; }
@@ -716,7 +693,7 @@ async function fetchInsiders(isBackground = false, signal = activeRequests.signa
     renderCarteraTable();
 
     if(activeTickers.length === 0) {
-      container.innerHTML = `<div class="card"><p style="color:var(--muted)">No se han registrado operaciones superiores a $1.000 en los últimos 7 días.</p></div>`;
+      container.innerHTML = `<div class="card"><p style="color:var(--muted)">No se han registrado operaciones en los últimos 7 días.</p></div>`;
     } else {
       let globalHtml = '';
       activeTickers.forEach(ticker => {
