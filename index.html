@@ -7,7 +7,6 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<!-- Añadimos Chart.js para el gráfico sectorial -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <style>
   :root {
@@ -19,35 +18,44 @@
     --accent-hover: #0369a1;
     --text: #0f172a;
     --muted: #64748b;
-    
     --bmo: #d97706; 
     --amc: #7c3aed; 
     --dmh: #059669; 
     --red: #dc2626;
     --green: #16a34a;
-    
     --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
   }
 
+  body.dark-theme {
+    --bg: #0f172a;
+    --surface: #1e293b;
+    --surface2: #334155;
+    --border: #334155;
+    --text: #f8fafc;
+    --muted: #94a3b8;
+    --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2);
+  }
+
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; min-height: 100vh; -webkit-font-smoothing: antialiased; }
+  body { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; min-height: 100vh; -webkit-font-smoothing: antialiased; transition: background 0.3s, color 0.3s; }
   
   .app { display: flex; min-height: 100vh; }
   
   /* Sidebar */
-  .sidebar { width: 240px; flex-shrink: 0; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 32px 0 24px; position: fixed; top: 0; left: 0; bottom: 0; }
+  .sidebar { width: 240px; flex-shrink: 0; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 32px 0 24px; position: fixed; top: 0; left: 0; bottom: 0; transition: background 0.3s, border 0.3s; }
   .sidebar-logo { padding: 0 24px 24px; border-bottom: 1px solid var(--border); margin-bottom: 24px; }
   .sidebar-logo h1 { font-size: 16px; font-weight: 700; color: var(--text); letter-spacing: -0.5px; line-height: 1.2; }
   .sidebar-logo p { font-size: 12px; color: var(--muted); margin-top: 6px; }
   
   .nav-item { display: flex; align-items: center; gap: 12px; padding: 12px 24px; cursor: pointer; font-size: 14px; font-weight: 500; color: var(--muted); transition: all .2s; border-left: 3px solid transparent; user-select: none; }
   .nav-item:hover { color: var(--text); background: var(--surface2); }
-  .nav-item.active { color: var(--accent); border-left-color: var(--accent); background: #f0f9ff; }
+  .nav-item.active { color: var(--accent); border-left-color: var(--accent); background: rgba(2, 132, 199, 0.08); }
   .nav-icon { font-size: 16px; width: 20px; text-align: center; }
   
-  .sidebar-footer { margin-top: auto; padding: 24px 24px 0; border-top: 1px solid var(--border); }
-  .sidebar-footer p { font-size: 11px; color: var(--muted); line-height: 1.6; }
-
+  .sidebar-footer { margin-top: auto; padding: 24px 24px 0; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 12px; }
+  .theme-toggle { padding: 8px 12px; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; font-size: 12px; cursor: pointer; color: var(--text); font-weight: 600; text-align: center; transition: all 0.2s; }
+  .theme-toggle:hover { filter: brightness(0.95); }
+  
   /* Main Area */
   .main { margin-left: 240px; flex: 1; padding: 40px; max-width: 1000px; }
   .page { display: none; }
@@ -57,17 +65,15 @@
   .page-header { margin-bottom: 32px; }
   .page-header h2 { font-size: 24px; font-weight: 700; color: var(--text); letter-spacing: -0.5px; }
 
-  /* Cards & General Elements */
-  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 24px; margin-bottom: 20px; box-shadow: var(--shadow); }
+  /* Cards & Generales */
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 24px; margin-bottom: 20px; box-shadow: var(--shadow); transition: background 0.3s, border 0.3s; }
   .card-label { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 16px; }
   
   .btn { border: none; border-radius: 8px; padding: 12px 24px; font-family: inherit; font-size: 14px; font-weight: 600; cursor: pointer; transition: all .2s; }
   .btn:hover:not(:disabled) { transform: translateY(-1px); }
   .btn:disabled { opacity: .6; cursor: not-allowed; }
   .btn-primary { background: var(--accent); color: white; box-shadow: 0 2px 4px rgba(2, 132, 199, 0.2); }
-  .btn-primary:hover:not(:disabled) { background: var(--accent-hover); box-shadow: 0 4px 6px rgba(2, 132, 199, 0.3); }
   .btn-ghost { background: var(--surface2); color: var(--text); border: 1px solid var(--border); padding: 10px 16px; font-size: 13px; }
-  .btn-ghost:hover:not(:disabled) { background: #e2e8f0; }
 
   .status-pill { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 500; margin-top: 12px; }
   .status-pill.ok { color: var(--dmh); }
@@ -75,85 +81,77 @@
   .status-pill.loading { color: var(--accent); }
 
   /* Cartera Stats & Layout */
-  .cartera-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
+  .cartera-grid { display: grid; grid-template-columns: 1fr 1.2fr; gap: 20px; margin-bottom: 20px; }
   .cartera-stats { display: flex; flex-direction: column; gap: 20px; }
   .stat-box { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px; box-shadow: var(--shadow); }
   .stat-val { font-size: 28px; font-weight: 700; color: var(--accent); line-height: 1; }
   .stat-lbl { font-size: 13px; color: var(--muted); margin-top: 6px; font-weight: 500; }
   
-  .chart-container { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px; box-shadow: var(--shadow); height: 100%; min-height: 250px; display: flex; flex-direction: column; }
-  .chart-wrapper { flex: 1; position: relative; width: 100%; display: flex; justify-content: center; align-items: center; }
+  .chart-container { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px; box-shadow: var(--shadow); display: flex; flex-direction: column; min-height: 280px;}
+  .chart-wrapper { flex: 1; position: relative; width: 100%; display: flex; justify-content: center; align-items: center; min-height: 200px; }
 
   /* Tables */
   .company-table { width: 100%; border-collapse: collapse; }
-  .company-table th { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; padding: 0 16px 12px; text-align: left; border-bottom: 1px solid var(--border); }
-  .company-table td { padding: 12px 16px; font-size: 14px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  .company-table th { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; padding: 0 16px 12px; text-align: left; border-bottom: 1px solid var(--border); cursor: pointer; user-select: none; }
+  .company-table th:hover { color: var(--text); }
+  .company-table td { padding: 12px 16px; font-size: 13px; border-bottom: 1px solid var(--border); vertical-align: middle; }
   .company-table tr:last-child td { border-bottom: none; }
-  .td-ticker { font-weight: 600; color: var(--accent); }
-  .td-name { color: var(--text); font-weight: 500; }
+  .td-ticker { font-weight: 600; color: var(--accent); width: 15%; }
+  .td-name { color: var(--text); font-weight: 500; width: 35%; }
+  .td-sector { color: var(--muted); width: 25%; font-size: 12px; }
+  .td-alerts { width: 25%; text-align: right; }
 
-  /* Action Bar */
-  .search-bar-row { display: flex; gap: 16px; margin-bottom: 24px; align-items: center; }
-  .search-info { font-size: 13px; color: var(--muted); background: var(--surface); padding: 8px 16px; border-radius: 20px; border: 1px solid var(--border); }
+  /* Alertas Badges */
+  .alert-badge { display: inline-flex; align-items: center; justify-content: center; padding: 4px 10px; border-radius: 6px; font-size: 10px; font-weight: 700; text-transform: uppercase; cursor: pointer; margin-left: 6px; transition: opacity .2s; letter-spacing: 0.5px;}
+  .alert-badge:hover { opacity: 0.8; }
+  .alert-earn { background: var(--bmo); color: #fff; }
+  .alert-ins { background: var(--amc); color: #fff; }
 
   /* Earnings Calendar */
+  .search-bar-row { display: flex; gap: 16px; margin-bottom: 24px; align-items: center; }
+  .search-info { font-size: 13px; color: var(--muted); background: var(--surface); padding: 8px 16px; border-radius: 20px; border: 1px solid var(--border); }
   .week-section { margin-bottom: 20px; }
   .week-toggle { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px 24px; display: flex; align-items: center; justify-content: space-between; cursor: pointer; transition: all .2s; box-shadow: var(--shadow); }
-  .week-toggle:hover { border-color: var(--accent); }
-  .week-toggle.open { border-color: var(--accent); border-bottom-color: transparent; border-radius: 12px 12px 0 0; background: #f8fafc; box-shadow: none; }
+  .week-toggle.open { border-color: var(--accent); border-bottom-color: transparent; border-radius: 12px 12px 0 0; background: var(--surface2); box-shadow: none; }
   .week-toggle-title { font-size: 16px; font-weight: 700; color: var(--text); }
   .week-toggle-sub { font-size: 13px; color: var(--muted); margin-top: 4px; }
-  
   .week-count { font-size: 12px; font-weight: 600; border-radius: 20px; padding: 4px 12px; }
   .week-count.has { background: var(--accent); color: white; }
   .week-count.empty { background: var(--border); color: var(--muted); }
-  
-  .week-body { background: var(--surface); border: 1px solid var(--accent); border-top: none; border-radius: 0 0 12px 12px; overflow: hidden; display: none; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.05); }
+  .week-body { background: var(--surface); border: 1px solid var(--accent); border-top: none; border-radius: 0 0 12px 12px; overflow: hidden; display: none; }
   .week-body.open { display: block; }
-  
   .day-block { border-bottom: 1px solid var(--border); }
-  .day-block:last-of-type { border-bottom: none; }
   .day-row { display: flex; align-items: flex-start; padding: 20px 24px; gap: 24px; min-height: 80px; }
-  
   .day-name-col { width: 120px; flex-shrink: 0; }
   .day-name-txt { font-size: 14px; font-weight: 700; color: var(--text); margin-bottom: 4px; display: flex; align-items: center; gap: 8px; }
   .today-dot { background: var(--accent); color: white; font-size: 10px; font-weight: 700; border-radius: 4px; padding: 2px 6px; }
   .day-date-txt { font-size: 13px; color: var(--muted); }
-  .day-name-col.today-col .day-name-txt { color: var(--accent); }
-  
   .day-companies { display: flex; flex-wrap: wrap; gap: 12px; flex: 1; }
-  .day-empty { font-size: 14px; color: var(--muted); padding-top: 2px; }
-  
   .earn-chip { display: flex; flex-direction: column; gap: 6px; background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; padding: 12px 16px; min-width: 180px; }
   .earn-chip-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
   .earn-ticker { font-size: 14px; font-weight: 700; color: var(--text); }
   .earn-name { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 150px; }
-  
   .earn-time { font-size: 11px; font-weight: 600; padding: 4px 8px; border-radius: 6px; display: inline-flex; align-items: center; gap: 4px; }
   .earn-time::before { content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%; }
   .bmo { background: #fef3c7; color: #b45309; } .bmo::before { background: currentColor; }
   .amc { background: #ede9fe; color: #6d28d9; } .amc::before { background: currentColor; }
   .dmh { background: #d1fae5; color: #047857; } .dmh::before { background: currentColor; }
-  .unk { background: #f1f5f9; color: #64748b; } .unk::before { background: currentColor; }
+  .unk { background: var(--surface); color: var(--muted); border: 1px solid var(--border); } .unk::before { background: currentColor; }
 
   /* Insiders */
   .insider-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; margin-bottom: 16px; box-shadow: var(--shadow); }
   .insider-card-header { display: flex; align-items: center; gap: 16px; padding: 16px 24px; background: var(--surface2); border-bottom: 1px solid var(--border); }
   .ins-ticker { font-size: 16px; font-weight: 700; color: var(--accent); }
   .ins-company { font-size: 15px; font-weight: 500; color: var(--text); }
-  .ins-badge { margin-left: auto; font-size: 12px; font-weight: 600; border-radius: 20px; padding: 4px 12px; background: #d1fae5; color: #047857; }
-  
+  .ins-badge { margin-left: auto; font-size: 12px; font-weight: 600; border-radius: 20px; padding: 4px 12px; background: rgba(5, 150, 105, 0.15); color: var(--dmh); }
   .ins-table { width: 100%; border-collapse: collapse; }
   .ins-table th { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; padding: 12px 24px; text-align: left; background: var(--surface); border-bottom: 1px solid var(--border); }
   .ins-table td { padding: 12px 24px; font-size: 13px; border-bottom: 1px solid var(--border); color: var(--text); }
-  .ins-table tr:last-child td { border-bottom: none; }
   .ins-table tr:hover td { background: var(--surface2); }
-  
-  .ins-buy { color: var(--green); font-weight: 600; }
-  .ins-sell { color: var(--red); font-weight: 600; }
   .ins-mono { font-family: monospace; font-size: 13px; color: var(--muted); }
-  
-  .note-box { font-size: 13px; color: var(--muted); margin-top: 16px; padding: 16px; background: var(--surface); border-radius: 10px; border: 1px solid var(--border); line-height: 1.5; }
+  .square-ind { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; }
+  .sq-red { background: var(--red); }
+  .sq-green { background: var(--green); }
 </style>
 </head>
 <body>
@@ -167,40 +165,41 @@
     <div class="nav-item" onclick="goTo('resultados')" id="nav-resultados"><span class="nav-icon">📅</span> Resultados</div>
     <div class="nav-item" onclick="goTo('insiders')" id="nav-insiders"><span class="nav-icon">🔍</span> Insiders</div>
     <div class="sidebar-footer">
-      <p><b>Fuentes:</b><br>Cartera: Google Sheets<br>Earnings: NASDAQ API<br>Insiders: NASDAQ API</p>
+      <button class="theme-toggle" onclick="toggleTheme()" id="btnTheme">🌙 Modo Oscuro</button>
     </div>
   </nav>
   
   <main class="main">
     <!-- CARTERA -->
     <div class="page active" id="page-cartera">
-      <div class="page-header">
-        <h2>Mi Cartera</h2>
-      </div>
+      <div class="page-header"><h2>Mi Cartera</h2></div>
       
       <div class="cartera-grid">
         <div class="cartera-stats">
           <div class="stat-box"><div class="stat-val" id="statTotal">—</div><div class="stat-lbl">Empresas analizadas</div></div>
-          <div class="stat-box"><div class="stat-val" id="statTime">—</div><div class="stat-lbl">Última sincronización</div></div>
           <div class="card" style="margin-bottom: 0;">
-            <div class="card-label">Estado de conexión</div>
-            <div class="status-pill loading" id="sheetStatus">⏳ Conectando con Google Sheets...</div>
+            <div class="card-label">Estado</div>
+            <div class="status-pill loading" id="sheetStatus">⏳ Conectando...</div>
             <div style="margin-top: 16px;"><button class="btn btn-ghost" onclick="init()">↻ Forzar recarga</button></div>
           </div>
         </div>
         
-        <!-- Contenedor del Gráfico Sectorial -->
         <div class="chart-container" id="chartCard" style="display:none;">
           <div class="card-label">Distribución Sectorial</div>
-          <div class="chart-wrapper">
-            <canvas id="sectorChart"></canvas>
-          </div>
+          <div class="chart-wrapper"><canvas id="sectorChart"></canvas></div>
         </div>
       </div>
 
       <div class="card" id="tableCard" style="display:none">
         <table class="company-table">
-          <thead><tr><th>Ticker detectado</th><th>Nombre de la Empresa</th></tr></thead>
+          <thead>
+            <tr>
+              <th id="th-ticker" onclick="sortTable('yahooTicker')">Ticker</th>
+              <th id="th-name" onclick="sortTable('name')">Empresa</th>
+              <th id="th-sector" onclick="sortTable('sector')">Sector</th>
+              <th>Alertas (Automáticas)</th>
+            </tr>
+          </thead>
           <tbody id="tableBody"></tbody>
         </table>
       </div>
@@ -208,52 +207,34 @@
 
     <!-- RESULTADOS -->
     <div class="page" id="page-resultados">
-      <div class="page-header">
-        <h2>Calendario de Resultados</h2>
-      </div>
+      <div class="page-header"><h2>Calendario de Resultados</h2></div>
       <div class="search-bar-row">
-        <button class="btn btn-primary" id="btnSearch" onclick="fetchEarnings()">▶ BUSCAR EARNINGS</button>
-        <span class="search-info" id="searchInfo">Consulta los datos para esta semana y la próxima.</span>
-      </div>
-      
-      <div class="note-box" style="margin-bottom: 24px;">
-        💡 <b>Nota sobre fechas y horarios:</b> Los datos provienen de la API de NASDAQ. Las empresas que aún no han emitido un comunicado oficial pueden aparecer con fechas estimadas. Además, si indica "Horario sin confirmar", significa que la empresa aún no ha reportado a NASDAQ si lo publicará Pre o Post mercado.
+        <button class="btn btn-primary" id="btnSearch" onclick="fetchEarnings(false)">▶ ACTUALIZAR EARNINGS</button>
+        <span class="search-info" id="searchInfo">Sincronizado automáticamente al inicio.</span>
       </div>
 
       <div class="week-section">
         <div class="week-toggle" id="toggleCurrent" onclick="toggleWeek('Current')">
-          <div>
-            <div class="week-toggle-title">Semana actual</div>
-            <div class="week-toggle-sub" id="subCurrent">—</div>
-          </div>
+          <div><div class="week-toggle-title">Semana actual</div><div class="week-toggle-sub" id="subCurrent">—</div></div>
           <span class="week-count empty" id="countCurrent">—</span>
         </div>
-        <div class="week-body" id="bodyCurrent">
-          <div style="padding: 24px; color: var(--muted); font-size: 14px;">Pulsa "Buscar earnings" para cargar los datos...</div>
-        </div>
+        <div class="week-body" id="bodyCurrent"><div style="padding:24px; color:var(--muted); font-size:14px;">Cargando datos...</div></div>
       </div>
       <div class="week-section">
         <div class="week-toggle" id="toggleNext" onclick="toggleWeek('Next')">
-          <div>
-            <div class="week-toggle-title">Semana siguiente</div>
-            <div class="week-toggle-sub" id="subNext">—</div>
-          </div>
+          <div><div class="week-toggle-title">Semana siguiente</div><div class="week-toggle-sub" id="subNext">—</div></div>
           <span class="week-count empty" id="countNext">—</span>
         </div>
-        <div class="week-body" id="bodyNext">
-          <div style="padding: 24px; color: var(--muted); font-size: 14px;">Pulsa "Buscar earnings" para cargar los datos...</div>
-        </div>
+        <div class="week-body" id="bodyNext"><div style="padding:24px; color:var(--muted); font-size:14px;">Cargando datos...</div></div>
       </div>
     </div>
 
     <!-- INSIDERS -->
     <div class="page" id="page-insiders">
-      <div class="page-header">
-        <h2>Movimientos de Insiders</h2>
-      </div>
+      <div class="page-header"><h2>Movimientos de Insiders</h2></div>
       <div class="search-bar-row">
-        <button class="btn btn-primary" id="btnInsiders" onclick="fetchInsiders()">▶ BUSCAR INSIDERS</button>
-        <span class="search-info" id="insiderInfo">Conexión a la API de NASDAQ para movimientos de los últimos 14 días.</span>
+        <button class="btn btn-primary" id="btnInsiders" onclick="fetchInsiders(false)">▶ ACTUALIZAR INSIDERS</button>
+        <span class="search-info" id="insiderInfo">Sincronizado automáticamente al inicio (Últimos 3 días).</span>
       </div>
       <div id="insidersContainer"></div>
     </div>
@@ -261,34 +242,47 @@
 </div>
 
 <script>
-// --- CONFIGURACIÓN ---
+// --- CONFIGURACIÓN E INICIO ---
 const SHEET_CSV = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSXSofvMaT7bYXduO3ywx6Pg5q-cZccTc2GcitfKbv9pvqaDIW_0xR2RHamWwt1h6KVxpf5Vm0EwLe-/pub?output=csv';
 const DAYS_ES = ['Lunes','Martes','Miércoles','Jueves','Viernes'];
 const XMAP = {'lon':'.L','lse':'.L','epa':'.PA','ams':'.AS','bru':'.BR','asx':'.AX','tse':'.TO','tsx':'.TO','cve':'.V','bit':'.MI','xetr':'.DE','fra':'.DE','bme':'.MC','swx':'.SW','hkex':'.HK','tyo':'.T','nse':'.NS','bse':'.BO'};
 
-// Instancia global del gráfico
+let companies = [];
 let chartInstance = null;
+let currentSort = { column: 'name', asc: true };
+let earningsAlerts = new Set();
+let insiderAlerts = new Set();
 
-// --- FUNCIÓN GENÉRICA ESTRICTA PARA APIS (Retorna JSON validado) ---
+// --- TEMA OSCURO ---
+function toggleTheme() {
+  document.body.classList.toggle('dark-theme');
+  const isDark = document.body.classList.contains('dark-theme');
+  localStorage.setItem('theme', isDark ? 'dark' : 'light');
+  document.getElementById('btnTheme').textContent = isDark ? '☀️ Modo Claro' : '🌙 Modo Oscuro';
+  if(chartInstance) chartInstance.update(); // Refrescar colores del gráfico
+}
+
+if (localStorage.getItem('theme') === 'dark') {
+  document.body.classList.add('dark-theme');
+  document.getElementById('btnTheme').textContent = '☀️ Modo Claro';
+}
+
+// --- FUNCIÓN RED ESTRICTA ---
 async function fetchApiJson(url) {
   const proxiesJson = [
     u => `https://corsproxy.io/?${encodeURIComponent(u)}`,
     u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`
   ];
-  
   let lastErr = '';
   for (const proxyFn of proxiesJson) {
     try {
       const res = await fetch(proxyFn(url), { headers: { 'Accept': 'application/json' }});
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const text = await res.text();
-      const json = JSON.parse(text); 
+      const json = JSON.parse(await res.text()); 
       if (json) return json; 
-    } catch (e) {
-      lastErr = e.message;
-    }
+    } catch (e) { lastErr = e.message; }
   }
-  throw new Error(`Error en proxies: ${lastErr}`);
+  throw new Error(lastErr);
 }
 
 // --- UTILIDADES ---
@@ -299,23 +293,16 @@ function toYahoo(raw) {
   return c.toUpperCase();
 }
 function base(t) { return t.split('.')[0].toUpperCase(); }
-
-let companies = [];
-
 function getWeekDates(offset=0) {
   const today = new Date(), day = today.getDay();
   const mon = new Date(today);
   mon.setDate(today.getDate() - (day === 0 ? 6 : day - 1) + offset * 7);
   return Array.from({length: 5}, (_, i) => { const d = new Date(mon); d.setDate(mon.getDate() + i); return d; });
 }
-
 const fmtES = d => d.toLocaleDateString('es-ES', { day: '2-digit', month: 'short' });
-const fmtTime = () => new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
-const isToday = d => d.toDateString() === new Date().toDateString();
 const toISO = d => d.toISOString().split('T')[0];
 
 const CW = getWeekDates(0), NW = getWeekDates(1);
-
 document.getElementById('subCurrent').textContent = `${fmtES(CW[0])} — ${fmtES(CW[4])}`;
 document.getElementById('subNext').textContent = `${fmtES(NW[0])} — ${fmtES(NW[4])}`;
 
@@ -328,136 +315,141 @@ function goTo(page) {
 
 window.addEventListener('load', init);
 
-// --- LÓGICA DE CARTERA ---
+// --- LÓGICA DE CARTERA Y ARRANQUE AUTOMÁTICO ---
 function parseCSVLine(line) {
   const cols = []; let cur = '', inQ = false;
   for(const ch of line) { if(ch === '"') inQ = !inQ; else if(ch === ',' && !inQ) { cols.push(cur.trim()); cur = ''; } else cur += ch; }
   cols.push(cur.trim()); return cols;
 }
 
-function isTicker(val) {
-  if(!val || val.length === 0 || val.length > 15 || val.includes(' ') || /^\d+$/.test(val) || !/^[A-Za-z:.\-]+$/.test(val)) return false;
-  return true;
-}
-
 async function init() {
   const el = document.getElementById('sheetStatus');
-  el.className = 'status-pill loading'; el.textContent = '⏳ Sincronizando cartera desde Google Sheets...';
-  document.getElementById('tableCard').style.display = 'none';
-  document.getElementById('chartCard').style.display = 'none';
-  companies = [];
+  el.className = 'status-pill loading'; el.textContent = '⏳ Sincronizando...';
+  companies = []; earningsAlerts.clear(); insiderAlerts.clear();
+  
   try {
     const res = await fetch(SHEET_CSV + '&t=' + Date.now());
     if(!res.ok) throw new Error('Error HTTP ' + res.status);
-    const csv = await res.text();
+    const lines = (await res.text()).trim().split('\n');
+    const seen = new Set();
     
-    const lines = csv.trim().split('\n'), seen = new Set();
     lines.forEach(line => {
       const cols = parseCSVLine(line);
       for(let ci = 0; ci < cols.length; ci++) {
         const val = cols[ci];
-        if(!isTicker(val)) continue;
+        if(!val || val.length > 15 || val.includes(' ') || /^\d+$/.test(val) || !/^[A-Za-z:.\-]+$/.test(val)) continue;
         const yahoo = toYahoo(val);
         if(!yahoo || seen.has(yahoo)) continue;
         let name = yahoo;
-        if(ci+1 < cols.length && cols[ci+1] && !isTicker(cols[ci+1]) && cols[ci+1].length > 1) name = cols[ci+1];
+        if(ci+1 < cols.length && cols[ci+1] && cols[ci+1].length > 1) name = cols[ci+1];
         seen.add(yahoo);
-        companies.push({ name, origTicker: val, yahooTicker: yahoo });
+        companies.push({ name, origTicker: val, yahooTicker: yahoo, sector: 'Cargando...' });
       }
     });
     
-    if(!companies.length) throw new Error('El documento está vacío o no contiene tickers válidos.');
-    
-    companies.sort((a,b) => a.name.localeCompare(b.name));
+    if(!companies.length) throw new Error('Documento vacío o sin tickers válidos.');
     document.getElementById('statTotal').textContent = companies.length;
-    document.getElementById('statTime').textContent = fmtTime();
-    
-    const tbody = document.getElementById('tableBody');
-    tbody.innerHTML = '';
-    companies.forEach(c => {
-      const tr = document.createElement('tr');
-      tr.innerHTML = `<td class="td-ticker">${c.yahooTicker}</td><td class="td-name">${c.name}</td>`;
-      tbody.appendChild(tr);
-    });
-    
+    el.className = 'status-pill ok'; el.textContent = `✓ OK. ${companies.length} empresas.`;
     document.getElementById('tableCard').style.display = 'block';
-    el.className = 'status-pill ok'; el.textContent = `✓ Conexión establecida. ${companies.length} empresas cargadas.`;
     
-    // Cargar los sectores en segundo plano para el gráfico
+    sortTable('name'); 
+    
+    // Disparar las tareas de fondo automáticas
     loadSectors();
+    fetchEarnings(true); 
+    fetchInsiders(true);
 
   } catch(e) {
     el.className = 'status-pill err'; el.textContent = `⚠️ Error: ${e.message}`;
   }
 }
 
+function sortTable(col) {
+  if (currentSort.column === col) { currentSort.asc = !currentSort.asc; } 
+  else { currentSort.column = col; currentSort.asc = true; }
+  
+  companies.sort((a, b) => {
+    let valA = (a[col] || '').toLowerCase();
+    let valB = (b[col] || '').toLowerCase();
+    if (valA < valB) return currentSort.asc ? -1 : 1;
+    if (valA > valB) return currentSort.asc ? 1 : -1;
+    return 0;
+  });
+  
+  const headers = { 'yahooTicker': 'Ticker', 'name': 'Empresa', 'sector': 'Sector' };
+  Object.keys(headers).forEach(k => {
+    const th = document.getElementById('th-' + (k === 'yahooTicker' ? 'ticker' : k));
+    if(th) th.textContent = headers[k] + (currentSort.column === k ? (currentSort.asc ? ' ▲' : ' ▼') : '');
+  });
+  
+  renderCarteraTable();
+}
+
+function renderCarteraTable() {
+  const tbody = document.getElementById('tableBody');
+  tbody.innerHTML = '';
+  companies.forEach(c => {
+    let alertsHtml = '';
+    if(earningsAlerts.has(c.yahooTicker)) alertsHtml += `<span class="alert-badge alert-earn" onclick="goTo('resultados')">Resultados</span>`;
+    if(insiderAlerts.has(c.yahooTicker)) alertsHtml += `<span class="alert-badge alert-ins" onclick="goTo('insiders')">Insiders</span>`;
+    
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td class="td-ticker">${c.yahooTicker}</td><td class="td-name">${c.name}</td><td class="td-sector">${c.sector}</td><td class="td-alerts">${alertsHtml}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+// --- GRÁFICO SECTORIAL (Progresivo para no saturar) ---
 async function fetchSectorSafe(ticker) {
-  const url = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(ticker)}?modules=assetProfile`;
   try {
-    const json = await fetchApiJson(url);
-    if(json?.quoteSummary?.result?.[0]?.assetProfile?.sector) {
-      return json.quoteSummary.result[0].assetProfile.sector;
-    }
+    const json = await fetchApiJson(`https://query2.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(ticker)}?modules=assetProfile`);
+    if(json?.quoteSummary?.result?.[0]?.assetProfile?.sector) return json.quoteSummary.result[0].assetProfile.sector;
   } catch(e) {}
   return 'Desconocido / Otros';
 }
 
 async function loadSectors() {
   document.getElementById('chartCard').style.display = 'flex';
-  const ctx = document.getElementById('sectorChart').getContext('2d');
+  const sectorsCount = {};
   
-  const sectors = {};
-  // Cargamos en pequeños lotes paralelos para no saturar
-  const batchSize = 5;
-  for(let i = 0; i < companies.length; i += batchSize) {
-    const batch = companies.slice(i, i + batchSize);
+  for(let i = 0; i < companies.length; i += 5) {
+    const batch = companies.slice(i, i + 5);
     await Promise.all(batch.map(async c => {
-      const sector = await fetchSectorSafe(c.yahooTicker);
-      sectors[sector] = (sectors[sector] || 0) + 1;
+      c.sector = await fetchSectorSafe(c.yahooTicker);
+      sectorsCount[c.sector] = (sectorsCount[c.sector] || 0) + 1;
     }));
+    renderCarteraTable();
+    updateChart(sectorsCount);
+    await new Promise(r => setTimeout(r, 600)); // Pausa para no saturar los proxies
   }
+}
 
-  // Ordenar de mayor a menor
-  const sortedSectors = Object.entries(sectors).sort((a,b) => b[1] - a[1]);
-  const labels = sortedSectors.map(s => s[0]);
-  const data = sortedSectors.map(s => s[1]);
-
+function updateChart(sectorsObj) {
+  const ctx = document.getElementById('sectorChart').getContext('2d');
+  const sorted = Object.entries(sectorsObj).sort((a,b) => b[1] - a[1]);
+  const isDark = document.body.classList.contains('dark-theme');
+  const textColor = isDark ? '#f8fafc' : '#475569';
+  
   if(chartInstance) chartInstance.destroy();
   
   chartInstance = new Chart(ctx, {
     type: 'doughnut',
     data: {
-      labels: labels,
+      labels: sorted.map(s => s[0]),
       datasets: [{
-        data: data,
-        backgroundColor: [
-          '#0ea5e9', '#10b981', '#8b5cf6', '#f59e0b', '#ef4444', 
-          '#64748b', '#14b8a6', '#f97316', '#6366f1', '#ec4899'
-        ],
-        borderWidth: 2,
-        borderColor: '#ffffff'
+        data: sorted.map(s => s[1]),
+        backgroundColor: ['#0ea5e9', '#10b981', '#8b5cf6', '#f59e0b', '#ef4444', '#64748b', '#14b8a6', '#f97316', '#6366f1', '#ec4899'],
+        borderWidth: 2, borderColor: isDark ? '#1e293b' : '#ffffff'
       }]
     },
     options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      cutout: '65%',
+      responsive: true, maintainAspectRatio: false, cutout: '65%',
       plugins: {
-        legend: {
-          position: 'right',
-          labels: { color: '#475569', font: { family: 'Inter', size: 11 }, padding: 15, usePointStyle: true, pointStyle: 'circle' }
-        },
-        tooltip: {
-          backgroundColor: '#0f172a', titleFont: { family: 'Inter' }, bodyFont: { family: 'Inter' },
-          callbacks: {
-            label: function(context) {
-              const count = context.raw;
-              const total = context.dataset.data.reduce((a, b) => a + b, 0);
-              const percentage = Math.round((count / total) * 100);
-              return ` ${count} empresas (${percentage}%)`;
-            }
-          }
-        }
+        legend: { position: 'right', labels: { color: textColor, font: { family: 'Inter', size: 11 }, padding: 15, usePointStyle: true } },
+        tooltip: { callbacks: { label: function(c) {
+          const total = c.dataset.data.reduce((a, b) => a + b, 0);
+          return ` ${c.raw} empresas (${Math.round((c.raw / total) * 100)}%)`;
+        }}}
       }
     }
   });
@@ -469,85 +461,49 @@ function toggleWeek(w) {
 }
 
 // --- EARNINGS ---
-async function fetchEarnings() {
-  if(!companies.length) { alert('Carga la cartera primero.'); return; }
+async function fetchEarnings(isBackground = false) {
+  if(!companies.length) return;
   const btn = document.getElementById('btnSearch');
-  btn.disabled = true; btn.textContent = '⏳ BUSCANDO...';
-  document.getElementById('searchInfo').textContent = 'Consultando fechas en NASDAQ...';
+  if(!isBackground) { btn.disabled = true; btn.textContent = '⏳ BUSCANDO...'; }
 
   const lookup = new Map();
   companies.forEach(c => {
-    lookup.set(base(c.yahooTicker), c);
-    lookup.set(c.yahooTicker.toUpperCase(), c);
+    lookup.set(base(c.yahooTicker), c); lookup.set(c.yahooTicker.toUpperCase(), c);
     if(c.origTicker.includes(':')) lookup.set(c.origTicker.split(':')[1].toUpperCase(), c);
   });
 
-  const allDates = [...CW, ...NW];
-  
-  const settled = await Promise.allSettled(allDates.map(d => {
+  const settled = await Promise.allSettled([...CW, ...NW].map(d => {
     const dISO = toISO(d);
-    const url = `https://api.nasdaq.com/api/calendar/earnings?date=${dISO}`;
-    return fetchApiJson(url)
+    return fetchApiJson(`https://api.nasdaq.com/api/calendar/earnings?date=${dISO}`)
       .then(json => (json?.data?.rows || []).flatMap(row => {
         const t = (row.symbol||'').toUpperCase().trim();
-        if(!t) return [];
-        const comp = lookup.get(t) || lookup.get(t.split('.')[0]);
+        const comp = t ? (lookup.get(t) || lookup.get(t.split('.')[0])) : null;
         if(!comp) return [];
-        
-        let timeLabel = 'Horario sin confirmar', timeClass = 'unk';
+        let timeLabel = 'Sin confirmar', timeClass = 'unk';
         const rt = (row.time||'').toLowerCase();
-        
-        if(rt.includes('before') || rt.includes('bmo') || rt.includes('pre')) { 
-          timeLabel = 'Pre-mercado'; timeClass = 'bmo'; 
-        }
-        else if(rt.includes('after') || rt.includes('amc') || rt.includes('post')) { 
-          timeLabel = 'Post-mercado'; timeClass = 'amc'; 
-        }
-        else if(rt.includes('during') || rt.includes('dmh')) { 
-          timeLabel = 'Durante sesión'; timeClass = 'dmh'; 
-        }
-        
+        if(rt.includes('before') || rt.includes('bmo') || rt.includes('pre')) { timeLabel = 'Pre-mercado'; timeClass = 'bmo'; }
+        else if(rt.includes('after') || rt.includes('amc') || rt.includes('post')) { timeLabel = 'Post-mercado'; timeClass = 'amc'; }
+        else if(rt.includes('during') || rt.includes('dmh')) { timeLabel = 'Durante sesión'; timeClass = 'dmh'; }
         return [{ ticker: comp.yahooTicker, name: comp.name, date: dISO, timeLabel, timeClass }];
       }));
   }));
 
   const results = [];
-  let errorCount = 0;
-  let lastErrorMsg = '';
-
-  settled.forEach(r => { 
-    if(r.status === 'fulfilled') {
-      results.push(...r.value); 
-    } else {
-      errorCount++;
-      lastErrorMsg = r.reason.message;
-    }
-  });
-
-  if (errorCount === allDates.length) {
-    document.getElementById('searchInfo').innerHTML = `<span style="color:var(--red)">⚠️ Fallo de conexión: ${lastErrorMsg}</span>`;
-    btn.disabled = false; btn.textContent = '▶ BUSCAR EARNINGS';
-    return;
-  }
-
-  const seen = new Set();
-  const unique = results.filter(r => { if(seen.has(r.ticker)) return false; seen.add(r.ticker); return true; });
-  unique.sort((a,b) => a.name.localeCompare(b.name));
-
+  settled.forEach(r => { if(r.status === 'fulfilled') results.push(...r.value); });
+  
+  const unique = results.filter((r, i, a) => a.findIndex(x => x.ticker === r.ticker) === i).sort((a,b) => a.name.localeCompare(b.name));
   const curr = unique.filter(r => CW.some(d => toISO(d) === r.date));
   const next = unique.filter(r => NW.some(d => toISO(d) === r.date));
 
-  renderWeek('Current', curr, CW);
-  renderWeek('Next', next, NW);
-  
-  ['Current','Next'].forEach(w => {
-    document.getElementById('toggle'+w).classList.add('open');
-    document.getElementById('body'+w).classList.add('open');
-  });
+  // Actualizar Alertas (Solo semana actual)
+  earningsAlerts = new Set(curr.map(r => r.ticker));
+  renderCarteraTable();
 
-  const errorTxt = errorCount > 0 ? ` (Atención: fallaron ${errorCount} días por saturación del servidor)` : '';
-  document.getElementById('searchInfo').textContent = `✓ Búsqueda completada: ${curr.length} empresas esta semana, ${next.length} la próxima.${errorTxt}`;
-  btn.disabled = false; btn.textContent = '▶ BUSCAR EARNINGS';
+  renderWeek('Current', curr, CW); renderWeek('Next', next, NW);
+  ['Current','Next'].forEach(w => { document.getElementById('toggle'+w).classList.add('open'); document.getElementById('body'+w).classList.add('open'); });
+
+  document.getElementById('searchInfo').textContent = `✓ Sincronizado: ${curr.length} esta semana, ${next.length} la próxima.`;
+  if(!isBackground) { btn.disabled = false; btn.textContent = '▶ ACTUALIZAR EARNINGS'; }
 }
 
 function renderWeek(which, items, weekDates) {
@@ -555,78 +511,48 @@ function renderWeek(which, items, weekDates) {
   countEl.textContent = `${items.length} empresa${items.length !== 1 ? 's' : ''}`;
   countEl.className = `week-count ${items.length > 0 ? 'has' : 'empty'}`;
   
-  const byDate = {};
-  items.forEach(it => { if(!byDate[it.date]) byDate[it.date] = []; byDate[it.date].push(it); });
+  const byDate = {}; items.forEach(it => { (byDate[it.date] = byDate[it.date] || []).push(it); });
   
   let html = '';
   weekDates.forEach((date, i) => {
     const key = toISO(date), di = byDate[key] || [], today = isToday(date);
     let compsHtml = '<span class="day-empty">—</span>';
-    
     if(di.length > 0) {
       compsHtml = di.map(it => `
-        <div class="earn-chip">
-          <div class="earn-chip-top">
-            <span class="earn-ticker">${it.ticker}</span>
-            <span class="earn-time ${it.timeClass}">${it.timeLabel}</span>
-          </div>
-          <span class="earn-name" title="${it.name}">${it.name}</span>
-        </div>
+        <div class="earn-chip"><div class="earn-chip-top"><span class="earn-ticker">${it.ticker}</span><span class="earn-time ${it.timeClass}">${it.timeLabel}</span></div><span class="earn-name">${it.name}</span></div>
       `).join('');
     }
-    
-    html += `
-      <div class="day-block">
-        <div class="day-row">
-          <div class="day-name-col ${today ? 'today-col' : ''}">
-            <div class="day-name-txt">${DAYS_ES[i]} ${today ? '<span class="today-dot">HOY</span>' : ''}</div>
-            <div class="day-date-txt">${fmtES(date)}</div>
-          </div>
-          <div class="day-companies">${compsHtml}</div>
-        </div>
-      </div>
-    `;
+    html += `<div class="day-block"><div class="day-row"><div class="day-name-col ${today ? 'today-col' : ''}"><div class="day-name-txt">${DAYS_ES[i]} ${today ? '<span class="today-dot">HOY</span>' : ''}</div><div class="day-date-txt">${fmtES(date)}</div></div><div class="day-companies">${compsHtml}</div></div></div>`;
   });
   bodyEl.innerHTML = html;
 }
 
-// --- INSIDERS (API DIRECTA DE NASDAQ) ---
-async function fetchInsiders() {
-  if(!companies.length) { alert('Carga la cartera primero.'); return; }
+// --- INSIDERS ---
+async function fetchInsiders(isBackground = false) {
+  if(!companies.length) return;
   const btn = document.getElementById('btnInsiders');
-  btn.disabled = true; btn.textContent = '⏳ CONECTANDO...';
+  if(!isBackground) { btn.disabled = true; btn.textContent = '⏳ CONECTANDO...'; }
   
   const usTickers = companies.filter(c => !c.yahooTicker.includes('.'));
-  document.getElementById('insiderInfo').textContent = `Consultando la base de datos de NASDAQ para ${usTickers.length} empresas USA...`;
   const container = document.getElementById('insidersContainer');
-  container.innerHTML = '';
+  if(!isBackground) container.innerHTML = '';
 
   try {
     const tradesByTicker = {};
     let totalTrades = 0;
-    
-    // Filtro de 14 días
-    const maxDaysAgo = 14;
+    const maxDaysAgo = 3; // Reducido a 3 días para quitar repeticiones
     const nowMs = Date.now();
 
-    // Consultamos todas en paralelo usando la API interna de NASDAQ (muy robusta y en formato JSON puro)
     await Promise.allSettled(usTickers.map(async (comp) => {
-      const ticker = base(comp.yahooTicker).toLowerCase();
-      const url = `https://api.nasdaq.com/api/company/${ticker}/insider-trades?limit=50&type=ALL`;
-      
       try {
-        const json = await fetchApiJson(url);
+        const json = await fetchApiJson(`https://api.nasdaq.com/api/company/${base(comp.yahooTicker).toLowerCase()}/insider-trades?limit=20&type=ALL`);
         const rows = json?.data?.transactionTable?.table?.rows || [];
         if (rows.length === 0) return;
 
         const validTxs = [];
-        
         rows.forEach(row => {
           if(!row.lastDate || !row.transactionType) return;
-          
-          // Filtrar por fecha (NASDAQ devuelve formato MM/DD/YYYY)
-          const txDate = new Date(row.lastDate);
-          const diffDays = (nowMs - txDate.getTime()) / (1000 * 3600 * 24);
+          const diffDays = (nowMs - new Date(row.lastDate).getTime()) / (1000 * 3600 * 24);
           if (diffDays > maxDaysAgo) return;
 
           const type = row.transactionType.toLowerCase();
@@ -634,84 +560,72 @@ async function fetchInsiders() {
           const isBuy = type.includes('buy') || type.includes('purchase');
           if (!isSale && !isBuy) return; 
 
-          // Formateo del valor total
           const shares = parseFloat((row.sharesTraded || '0').replace(/,/g, ''));
           const price = parseFloat((row.lastPrice || '0').replace(/,/g, ''));
-          let totalValue = '—';
-          if (!isNaN(shares) && !isNaN(price) && shares > 0 && price > 0) {
-             totalValue = '$' + (shares * price).toLocaleString('en-US', {maximumFractionDigits: 0});
-          }
+          const totalValueNum = (shares * price) || 0;
+          
+          if (totalValueNum < 10000) return; // Filtro de ruido: Ignorar operaciones de menos de 10.000$
+
+          let relevance = 'Media';
+          let relColor = 'var(--bmo)';
+          if (totalValueNum >= 100000) { relevance = 'Considerable'; relColor = 'var(--accent)'; }
 
           validTxs.push({
-            date: row.lastDate,
-            insider: row.insider || 'Desconocido',
-            title: row.relation || '—',
-            typeText: isSale ? 'Venta' : 'Compra',
-            isSale: isSale,
-            price: row.lastPrice ? '$' + row.lastPrice : '—',
-            qty: row.sharesTraded || '—',
-            value: totalValue
+            date: row.lastDate, insider: row.insider || 'Desconocido', title: row.relation || '—',
+            isSale: isSale, price: row.lastPrice ? '$' + row.lastPrice : '—', qty: row.sharesTraded || '—',
+            valueNum: totalValueNum, valueStr: '$' + totalValueNum.toLocaleString('en-US', {maximumFractionDigits: 0}),
+            relevance: relevance, relColor: relColor
           });
         });
 
         if (validTxs.length > 0) {
-          tradesByTicker[comp.yahooTicker] = validTxs;
+          tradesByTicker[comp.yahooTicker] = validTxs.sort((a,b) => b.valueNum - a.valueNum); // Ordenar por volumen
           totalTrades += validTxs.length;
         }
-      } catch(e) {} // Silenciamos errores individuales para que el resto siga cargando
+      } catch(e) {} 
     }));
 
     const activeTickers = Object.keys(tradesByTicker);
     
+    // Actualizar Alertas
+    insiderAlerts = new Set(activeTickers);
+    renderCarteraTable();
+
     if(activeTickers.length === 0) {
-      container.innerHTML = `<div class="card"><p style="color:var(--muted)">No se encontraron compras ni ventas de mercado por parte de Insiders en los últimos 14 días para tu cartera.</p></div>`;
-      document.getElementById('insiderInfo').textContent = `✓ Búsqueda completada. Sin movimientos recientes.`;
+      container.innerHTML = `<div class="card"><p style="color:var(--muted)">No se han registrado operaciones significativas (>${10000}$) en los últimos 3 días.</p></div>`;
     } else {
-      document.getElementById('insiderInfo').textContent = `✓ Búsqueda completada: ${totalTrades} movimientos encontrados en ${activeTickers.length} empresas (Últimos 14 días).`;
-      
+      let globalHtml = '';
       activeTickers.forEach(ticker => {
-        const comp = companies.find(c => c.yahooTicker === ticker);
-        const compName = comp ? comp.name : ticker;
-        const trades = tradesByTicker[ticker];
-        
-        const div = document.createElement('div');
-        div.className = 'insider-card';
+        const compName = companies.find(c => c.yahooTicker === ticker)?.name || ticker;
         let tHtml = `
-          <div class="insider-card-header">
-            <span class="ins-ticker">${ticker}</span>
-            <span class="ins-company">${compName}</span>
-            <span class="ins-badge">${trades.length} mov.</span>
-          </div>
+          <div class="insider-card">
+          <div class="insider-card-header"><span class="ins-ticker">${ticker}</span><span class="ins-company">${compName}</span><span class="ins-badge">${tradesByTicker[ticker].length} mov.</span></div>
           <table class="ins-table">
-            <thead><tr><th>Fecha</th><th>Insider</th><th>Cargo</th><th>Operación</th><th>Precio</th><th>Acciones</th><th>Valor Total</th></tr></thead>
+            <thead><tr><th>Fecha</th><th>Insider</th><th>Operación</th><th>Importancia</th><th>Acciones</th><th>Precio</th><th>Valor Total</th></tr></thead>
             <tbody>
         `;
-        
-        trades.forEach(t => {
-          tHtml += `
-            <tr>
-              <td class="ins-mono">${t.date}</td>
-              <td><b>${t.insider}</b></td>
-              <td style="color:var(--muted); font-size:12px; max-width:150px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${t.title}">${t.title}</td>
-              <td class="${t.isSale ? 'ins-sell' : 'ins-buy'}">${t.isSale ? '▼' : '▲'} ${t.typeText}</td>
-              <td class="ins-mono">${t.price}</td>
-              <td class="ins-mono">${t.qty}</td>
-              <td class="ins-mono" style="font-weight:600">${t.value}</td>
-            </tr>
-          `;
+        tradesByTicker[ticker].forEach(t => {
+          tHtml += `<tr>
+            <td class="ins-mono">${t.date}</td>
+            <td><b>${t.insider}</b><br><span style="font-size:11px;color:var(--muted)">${t.title}</span></td>
+            <td style="color: ${t.isSale ? 'var(--red)' : 'var(--green)'}; font-weight:600;"><span class="square-ind ${t.isSale ? 'sq-red' : 'sq-green'}"></span>${t.isSale ? 'Venta' : 'Compra'}</td>
+            <td style="color:${t.relColor}; font-weight:600; font-size:12px;">${t.relevance}</td>
+            <td class="ins-mono">${t.qty}</td>
+            <td class="ins-mono">${t.price}</td>
+            <td class="ins-mono" style="font-weight:700">${t.valueStr}</td>
+          </tr>`;
         });
-        tHtml += `</tbody></table>`;
-        div.innerHTML = tHtml;
-        container.appendChild(div);
+        tHtml += `</tbody></table></div>`;
+        globalHtml += tHtml;
       });
+      container.innerHTML = globalHtml;
     }
+    document.getElementById('insiderInfo').textContent = `✓ Actualizado: ${totalTrades} operaciones significativas (Últimos 3 días).`;
 
   } catch(err) {
-    container.innerHTML = `<div class="card" style="border-color:var(--red)"><p style="color:var(--red)">⚠️ Error interno al rastrear Insiders: ${err.message}</p></div>`;
-    document.getElementById('insiderInfo').textContent = `Error en la búsqueda.`;
+    if(!isBackground) container.innerHTML = `<div class="card"><p style="color:var(--red)">⚠️ Error interno: ${err.message}</p></div>`;
   }
-  
-  btn.disabled = false; btn.textContent = '▶ BUSCAR INSIDERS';
+  if(!isBackground) { btn.disabled = false; btn.textContent = '▶ ACTUALIZAR INSIDERS'; }
 }
 </script>
 </body>
