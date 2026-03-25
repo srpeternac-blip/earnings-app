@@ -203,7 +203,7 @@
       </div>
       
       <div class="note-box" style="margin-bottom: 24px;">
-        💡 <b>Nota sobre fechas:</b> Los datos se extraen de la API de NASDAQ. Las empresas que aún no han emitido un comunicado oficial pueden aparecer con fechas "estimadas" por NASDAQ basadas en su histórico (ej. ASPI).
+        💡 <b>Nota sobre fechas y horarios:</b> Los datos provienen de la API de NASDAQ. Las empresas que aún no han emitido un comunicado oficial pueden aparecer con fechas estimadas. Además, si indica "Horario sin confirmar", significa que la empresa aún no ha reportado a NASDAQ si lo publicará Pre o Post mercado.
       </div>
 
       <div class="week-section">
@@ -253,11 +253,11 @@ const SHEET_CSV = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSXSofvMaT7bY
 const DAYS_ES = ['Lunes','Martes','Miércoles','Jueves','Viernes'];
 const XMAP = {'lon':'.L','lse':'.L','epa':'.PA','ams':'.AS','bru':'.BR','asx':'.AX','tse':'.TO','tsx':'.TO','cve':'.V','bit':'.MI','xetr':'.DE','fra':'.DE','bme':'.MC','swx':'.SW','hkex':'.HK','tyo':'.T','nse':'.NS','bse':'.BO'};
 
-// Proxies en cascada
+// Proxies en cascada (actualizado con uno más fiable para HTML)
 const PROXIES = [
+  u => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`,
   u => `https://corsproxy.io/?${encodeURIComponent(u)}`,
-  u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
-  u => `https://cors.sh/${u}`
+  u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`
 ];
 
 async function fetchWithProxy(url) {
@@ -396,11 +396,19 @@ async function fetchEarnings() {
         const comp = lookup.get(t) || lookup.get(t.split('.')[0]);
         if(!comp) return [];
         
-        let timeLabel = 'Sin confirmar', timeClass = 'unk';
+        // Mejorado el parseo para que sea más amplio y claro
+        let timeLabel = 'Horario sin confirmar', timeClass = 'unk';
         const rt = (row.time||'').toLowerCase();
-        if(rt.includes('before') || rt.includes('bmo')) { timeLabel = 'Pre-mercado'; timeClass = 'bmo'; }
-        else if(rt.includes('after') || rt.includes('amc')) { timeLabel = 'Post-mercado'; timeClass = 'amc'; }
-        else if(rt.includes('during')) { timeLabel = 'Durante sesión'; timeClass = 'dmh'; }
+        
+        if(rt.includes('before') || rt.includes('bmo') || rt.includes('pre')) { 
+          timeLabel = 'Pre-mercado'; timeClass = 'bmo'; 
+        }
+        else if(rt.includes('after') || rt.includes('amc') || rt.includes('post')) { 
+          timeLabel = 'Post-mercado'; timeClass = 'amc'; 
+        }
+        else if(rt.includes('during') || rt.includes('dmh')) { 
+          timeLabel = 'Durante sesión'; timeClass = 'dmh'; 
+        }
         
         return [{ ticker: comp.yahooTicker, name: comp.name, date: dISO, timeLabel, timeClass }];
       }));
@@ -480,42 +488,50 @@ async function fetchInsiders() {
   container.innerHTML = '';
 
   try {
-    // OpenInsider URL con todos los tickers (últimos 7 días)
-    const tString = usTickers.map(t => t.yahooTicker.split('.')[0]).join('%2C');
-    const oiUrl = `http://openinsider.com/screener?s=${tString}&fd=7`;
-    
-    const html = await fetchWithProxy(oiUrl);
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(html, 'text/html');
-    
-    // Buscar la tabla de resultados
-    const rows = doc.querySelectorAll('.tinytable tbody tr');
+    // Para evitar que la URL sea muy larga y el proxy la bloquee, la dividimos en lotes de 10 empresas
+    const chunkSize = 10;
     const tradesByTicker = {};
     let totalTrades = 0;
-
-    rows.forEach(tr => {
-      const tds = tr.querySelectorAll('td');
-      if(tds.length < 12) return;
+    
+    for (let i = 0; i < usTickers.length; i += chunkSize) {
+      const chunk = usTickers.slice(i, i + chunkSize);
+      const tString = chunk.map(t => t.yahooTicker.split('.')[0]).join('%2C');
+      const oiUrl = `http://openinsider.com/screener?s=${tString}&fd=7`;
       
-      const ticker = tds[3].textContent.trim().toUpperCase();
-      if(!tradesByTicker[ticker]) tradesByTicker[ticker] = [];
-      
-      const type = tds[7].textContent.trim();
-      const isSale = type.toLowerCase().includes('sale');
-      
-      tradesByTicker[ticker].push({
-        filingDate: tds[1].textContent.trim().split(' ')[0],
-        tradeDate: tds[2].textContent.trim(),
-        insider: tds[5].textContent.trim(),
-        title: tds[6].textContent.trim(),
-        typeText: isSale ? 'Venta' : 'Compra',
-        isSale: isSale,
-        price: tds[8].textContent.trim(),
-        qty: tds[9].textContent.trim(),
-        value: tds[12].textContent.trim()
-      });
-      totalTrades++;
-    });
+      try {
+        const html = await fetchWithProxy(oiUrl);
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(html, 'text/html');
+        
+        const rows = doc.querySelectorAll('.tinytable tbody tr');
+        
+        rows.forEach(tr => {
+          const tds = tr.querySelectorAll('td');
+          if(tds.length < 12) return;
+          
+          const ticker = tds[3].textContent.trim().toUpperCase();
+          if(!tradesByTicker[ticker]) tradesByTicker[ticker] = [];
+          
+          const type = tds[7].textContent.trim();
+          const isSale = type.toLowerCase().includes('sale');
+          
+          tradesByTicker[ticker].push({
+            filingDate: tds[1].textContent.trim().split(' ')[0],
+            tradeDate: tds[2].textContent.trim(),
+            insider: tds[5].textContent.trim(),
+            title: tds[6].textContent.trim(),
+            typeText: isSale ? 'Venta' : 'Compra',
+            isSale: isSale,
+            price: tds[8].textContent.trim(),
+            qty: tds[9].textContent.trim(),
+            value: tds[12].textContent.trim()
+          });
+          totalTrades++;
+        });
+      } catch (chunkError) {
+        console.warn(`Error procesando lote ${i}:`, chunkError);
+      }
+    }
 
     const activeTickers = Object.keys(tradesByTicker);
     
