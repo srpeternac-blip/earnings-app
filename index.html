@@ -254,41 +254,6 @@ const SHEET_CSV = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSXSofvMaT7bY
 const DAYS_ES = ['Lunes','Martes','Miércoles','Jueves','Viernes'];
 const XMAP = {'lon':'.L','lse':'.L','epa':'.PA','ams':'.AS','bru':'.BR','asx':'.AX','tse':'.TO','tsx':'.TO','cve':'.V','bit':'.MI','xetr':'.DE','fra':'.DE','bme':'.MC','swx':'.SW','hkex':'.HK','tyo':'.T','nse':'.NS','bse':'.BO'};
 
-// DICCIONARIO LOCAL (Base de conocimiento inicial)
-const SECTORES_LOCALES = {
-  "AAPL": "Tecnología", "MSFT": "Tecnología", "NVDA": "Tecnología", "AVGO": "Tecnología", "SNOW": "Tecnología",
-  "CRWD": "Tecnología", "VNET": "Tecnología", "ONDS": "Tecnología", "PLTR": "Tecnología", "AMD": "Tecnología",
-  "INTC": "Tecnología", "CRM": "Tecnología", "PANW": "Tecnología", "ADBE": "Tecnología", "CSCO": "Tecnología",
-  "META": "Comunicación", "GOOG": "Comunicación", "GOOGL": "Comunicación", "NFLX": "Comunicación", "DIS": "Comunicación",
-  "AMZN": "Consumo Discrecional", "TSLA": "Consumo Discrecional", "HD": "Consumo Discrecional", "MCD": "Consumo Discrecional",
-  "NKE": "Consumo Discrecional", "SBUX": "Consumo Discrecional", "LENZ": "Consumo Discrecional", "MELI": "Consumo Discrecional",
-  "UNH": "Salud", "JNJ": "Salud", "LLY": "Salud", "ABBV": "Salud", "MRK": "Salud", "PFE": "Salud", 
-  "LGND": "Salud", "BMEA": "Salud", "ASPI": "Salud", "MGTX": "Salud", "ILMN": "Salud", "GILD": "Salud", "AMGN": "Salud",
-  "JPM": "Finanzas", "V": "Finanzas", "MA": "Finanzas", "BAC": "Finanzas", "WFC": "Finanzas", "C": "Finanzas", 
-  "AFL": "Finanzas", "GS": "Finanzas", "MS": "Finanzas", "AXP": "Finanzas", "BLK": "Finanzas", "PYPL": "Finanzas", "FI": "Finanzas",
-  "HON": "Industriales", "CAT": "Industriales", "GE": "Industriales", "UNP": "Industriales", "BA": "Industriales",
-  "RTX": "Industriales", "LMT": "Industriales", "DE": "Industriales",
-  "PLD": "Inmobiliario", "AMT": "Inmobiliario", "CCI": "Inmobiliario", "EQIX": "Inmobiliario", "PSA": "Inmobiliario", "JLL": "Inmobiliario", "O": "Inmobiliario",
-  "XOM": "Energía", "CVX": "Energía", "COP": "Energía", "SLB": "Energía", "EOG": "Energía", "MPC": "Energía", "PSX": "Energía",
-  "LIN": "Materiales Básicos", "SHW": "Materiales Básicos", "NEM": "Materiales Básicos", "FCX": "Materiales Básicos", "APD": "Materiales Básicos", "METC": "Materiales Básicos",
-  "BITF": "Cripto/Blockchain", "MARA": "Cripto/Blockchain", "RIOT": "Cripto/Blockchain", "COIN": "Cripto/Blockchain", "MSTR": "Cripto/Blockchain", "CLSK": "Cripto/Blockchain",
-  "WMT": "Consumo Defensivo", "PG": "Consumo Defensivo", "KO": "Consumo Defensivo", "PEP": "Consumo Defensivo", "COST": "Consumo Defensivo",
-  "NEE": "Utilities", "DUK": "Utilities", "SO": "Utilities"
-};
-
-// Carga la caché aprendida previamente por el navegador
-function getKnownSectors() {
-  const cached = JSON.parse(localStorage.getItem('cachedSectors') || '{}');
-  return { ...SECTORES_LOCALES, ...cached };
-}
-
-// Guarda un nuevo sector aprendido para que sea instantáneo la próxima vez
-function saveSectorToCache(ticker, sector) {
-  const cached = JSON.parse(localStorage.getItem('cachedSectors') || '{}');
-  cached[ticker.toUpperCase()] = sector;
-  localStorage.setItem('cachedSectors', JSON.stringify(cached));
-}
-
 let companies = [];
 let chartInstance = null;
 let currentSort = { column: 'name', asc: true };
@@ -348,7 +313,7 @@ async function fetchApiJson(url, signal) {
   throw new Error(lastErr);
 }
 
-// --- UTILIDADES DECLARADAS COMO FUNCIONES (Previene ReferenceError) ---
+// --- UTILIDADES DECLARADAS COMO FUNCIONES ---
 function toYahoo(raw) {
   if(!raw) return null;
   const c = raw.trim();
@@ -424,8 +389,6 @@ async function init() {
     if(!res.ok) throw new Error('Error HTTP ' + res.status);
     const lines = (await res.text()).trim().split('\n');
     const seen = new Set();
-    const knownSectors = getKnownSectors();
-    const missingSectors = [];
     
     lines.forEach(line => {
       const cols = parseCSVLine(line);
@@ -438,16 +401,7 @@ async function init() {
         if(ci+1 < cols.length && cols[ci+1] && cols[ci+1].length > 1) name = cols[ci+1];
         seen.add(yahoo);
         
-        let tickerBase = base(yahoo);
-        let sectorFinal = knownSectors[tickerBase];
-        
-        // Si es una empresa totalmente nueva, la marcamos para buscarla
-        if (!sectorFinal) {
-           sectorFinal = 'Cargando...';
-           missingSectors.push(tickerBase);
-        }
-        
-        companies.push({ name, origTicker: val, yahooTicker: yahoo, sector: sectorFinal, tickerBase });
+        companies.push({ name, origTicker: val, yahooTicker: yahoo, sector: 'Cargando...' });
       }
     });
     
@@ -455,24 +409,15 @@ async function init() {
     document.getElementById('statTotal').textContent = companies.length;
     el.className = 'status-pill ok'; el.textContent = `✓ OK. ${companies.length} empresas.`;
     document.getElementById('tableCard').style.display = 'block';
+    document.getElementById('chartCard').style.display = 'flex';
     
     sortTable('name'); 
-
-    // Renderizar gráfico de forma instantánea
-    document.getElementById('chartCard').style.display = 'flex';
     updateChartFromCompanies();
     
-    // Disparar las tareas vitales primero
+    // Disparar las tareas de forma secuencial y limpia
     fetchEarnings(true, signal)
       .then(() => fetchInsiders(true, signal))
-      .then(() => {
-         // Aprender los sectores de empresas nuevas si las hay
-         if (missingSectors.length > 0) {
-            fetchMissingSectors(missingSectors, signal).catch(e => {
-               if(e.name !== 'AbortError') console.warn(e);
-            });
-         }
-      })
+      .then(() => loadSectors(signal)) // Los sectores se cargan dinámicamente al final
       .catch(e => {
          if(e.message !== "Cancelado por el usuario") console.error(e);
       });
@@ -484,38 +429,61 @@ async function init() {
   }
 }
 
-// Búsqueda lenta en segundo plano solo para las empresas desconocidas
-async function fetchSectorSafe(ticker, signal) {
+// Búsqueda dinámica y directa a Yahoo Finance para descubrir el sector de la empresa
+async function fetchYahooSector(ticker, signal) {
+  const url = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(ticker)}?modules=assetProfile`;
+  
+  // Preferimos corsproxy para evitar el bloqueo GDPR de Yahoo en Europa
   try {
-    const json = await fetchApiJson(`https://query2.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(ticker)}?modules=assetProfile`, signal);
-    if(json?.quoteSummary?.result?.[0]?.assetProfile?.sector) return json.quoteSummary.result[0].assetProfile.sector;
+    if (signal && signal.aborted) return 'Cargando...';
+    const res = await fetch(`https://corsproxy.io/?${encodeURIComponent(url)}`, { signal });
+    if (res.ok) {
+      const json = await res.json();
+      if (json?.quoteSummary?.result?.[0]?.assetProfile?.sector) {
+        return json.quoteSummary.result[0].assetProfile.sector;
+      }
+    }
   } catch(e) {}
-  return 'Otros';
+
+  // Respaldo
+  try {
+    if (signal && signal.aborted) return 'Cargando...';
+    const res = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(url)}`, { signal });
+    if (res.ok) {
+      const data = await res.json();
+      const json = JSON.parse(data.contents);
+      if (json?.quoteSummary?.result?.[0]?.assetProfile?.sector) {
+        return json.quoteSummary.result[0].assetProfile.sector;
+      }
+    }
+  } catch(e) {}
+
+  return 'Desconocido';
 }
 
-async function fetchMissingSectors(tickersArray, signal) {
-    const uniqueTickers = [...new Set(tickersArray)];
-    for (const ticker of uniqueTickers) {
+async function loadSectors(signal) {
+    // Procesamos de 1 en 1 asíncronamente con pausas para no bloquear la app
+    for (let i = 0; i < companies.length; i++) {
         if (signal && signal.aborted) return;
-        try {
-            const sector = await fetchSectorSafe(ticker, signal);
-            saveSectorToCache(ticker, sector);
-            
-            // Actualizar tabla y gráfico
-            companies.forEach(c => {
-                if (c.tickerBase === ticker) c.sector = sector;
-            });
-            renderCarteraTable();
-            updateChartFromCompanies();
-        } catch(e) {}
-        await new Promise(r => setTimeout(r, 1000)); // Pausa de 1s para no molestar a los proxies
+        
+        const c = companies[i];
+        if (c.sector === 'Cargando...') {
+            c.sector = await fetchYahooSector(c.yahooTicker, signal);
+        }
+        
+        // Actualizamos UI después de procesar cada empresa
+        renderCarteraTable();
+        updateChartFromCompanies();
+        
+        // Retraso seguro de medio segundo entre cada petición a Yahoo
+        await new Promise(r => setTimeout(r, 500));
     }
 }
 
 function updateChartFromCompanies() {
   const sectorsCount = {};
   companies.forEach(c => {
-      const sec = c.sector === 'Cargando...' ? 'Desconocido / Otros' : c.sector;
+      const sec = c.sector;
       sectorsCount[sec] = (sectorsCount[sec] || 0) + 1;
   });
   updateChart(sectorsCount);
@@ -553,7 +521,7 @@ function renderCarteraTable() {
     const tickerLink = `<a href="https://es.investing.com/pro/${base(c.yahooTicker)}" target="_blank" class="ticker-link">${c.yahooTicker}</a>`;
     
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td class="td-ticker">${tickerLink}</td><td class="td-name">${c.name}</td><td class="td-sector">${c.sector}</td><td class="td-alerts">${alertsHtml}</td>`;
+    tr.innerHTML = `<td class="td-ticker">${tickerLink}</td><td class="td-name">${c.name}</td><td class="td-sector" style="${c.sector === 'Cargando...' ? 'color:var(--accent); font-style:italic;' : ''}">${c.sector}</td><td class="td-alerts">${alertsHtml}</td>`;
     tbody.appendChild(tr);
   });
 }
@@ -572,7 +540,7 @@ function updateChart(sectorsObj) {
       labels: sorted.map(s => s[0]),
       datasets: [{
         data: sorted.map(s => s[1]),
-        backgroundColor: ['#0ea5e9', '#10b981', '#8b5cf6', '#f59e0b', '#ef4444', '#64748b', '#14b8a6', '#f97316', '#6366f1', '#ec4899'],
+        backgroundColor: ['#0ea5e9', '#10b981', '#8b5cf6', '#f59e0b', '#ef4444', '#64748b', '#14b8a6', '#f97316', '#6366f1', '#ec4899', '#94a3b8'],
         borderWidth: 2, borderColor: isDark ? '#1e293b' : '#ffffff'
       }]
     },
