@@ -253,21 +253,41 @@ const SHEET_CSV = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSXSofvMaT7bY
 const DAYS_ES = ['Lunes','Martes','Miércoles','Jueves','Viernes'];
 const XMAP = {'lon':'.L','lse':'.L','epa':'.PA','ams':'.AS','bru':'.BR','asx':'.AX','tse':'.TO','tsx':'.TO','cve':'.V','bit':'.MI','xetr':'.DE','fra':'.DE','bme':'.MC','swx':'.SW','hkex':'.HK','tyo':'.T','nse':'.NS','bse':'.BO'};
 
-// Proxies en cascada (actualizado con uno más fiable para HTML)
+// Proxies verificados y en orden de prioridad
 const PROXIES = [
-  u => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`,
   u => `https://corsproxy.io/?${encodeURIComponent(u)}`,
-  u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`
+  u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
+  u => `https://thingproxy.freeboard.io/fetch/${u}`
 ];
 
-async function fetchWithProxy(url) {
+// Función mejorada con validación estricta del contenido que devuelve el proxy
+async function fetchWithProxy(url, expectedType = 'json') {
+  let lastError = '';
   for(const proxyFn of PROXIES) {
     try {
       const res = await fetch(proxyFn(url), { headers: { Accept: 'application/json, text/plain, text/html, */*' }});
-      if(res.ok) { const t = await res.text(); if(t && t.length > 10) return t; }
-    } catch {}
+      if(!res.ok) throw new Error(`HTTP ${res.status}`);
+      
+      const t = await res.text();
+      if(t.length < 50) throw new Error('Respuesta del proxy vacía o incompleta');
+
+      // Si esperamos JSON (Earnings), validamos que no sea un HTML de error del proxy
+      if (expectedType === 'json') {
+        JSON.parse(t); 
+      } 
+      // Si esperamos HTML (Insiders), validamos que contenga la web original y no un error del proxy
+      else if (expectedType === 'html') {
+        if (!t.toLowerCase().includes('openinsider') && !t.includes('<table')) {
+          throw new Error('El proxy no devolvió la página correcta de OpenInsider');
+        }
+      }
+      return t;
+    } catch (e) {
+      lastError = e.message;
+      // Continúa con el siguiente proxy en el bucle
+    }
   }
-  throw new Error('No se pudo conectar a través de los proxies de seguridad.');
+  throw new Error(`Los proxies fallaron al obtener los datos. Último error: ${lastError}`);
 }
 
 // --- UTILIDADES ---
@@ -388,7 +408,8 @@ async function fetchEarnings() {
   const allDates = [...CW, ...NW];
   const settled = await Promise.allSettled(allDates.map(d => {
     const dISO = toISO(d);
-    return fetchWithProxy(`https://api.nasdaq.com/api/calendar/earnings?date=${dISO}`)
+    // Solicitamos tipo 'json' para que valide el contenido
+    return fetchWithProxy(`https://api.nasdaq.com/api/calendar/earnings?date=${dISO}`, 'json')
       .then(t => JSON.parse(t))
       .then(j => (j?.data?.rows || []).flatMap(row => {
         const t = (row.symbol||'').toUpperCase().trim();
@@ -396,7 +417,6 @@ async function fetchEarnings() {
         const comp = lookup.get(t) || lookup.get(t.split('.')[0]);
         if(!comp) return [];
         
-        // Mejorado el parseo para que sea más amplio y claro
         let timeLabel = 'Horario sin confirmar', timeClass = 'unk';
         const rt = (row.time||'').toLowerCase();
         
@@ -488,7 +508,6 @@ async function fetchInsiders() {
   container.innerHTML = '';
 
   try {
-    // Para evitar que la URL sea muy larga y el proxy la bloquee, la dividimos en lotes de 10 empresas
     const chunkSize = 10;
     const tradesByTicker = {};
     let totalTrades = 0;
@@ -499,7 +518,8 @@ async function fetchInsiders() {
       const oiUrl = `http://openinsider.com/screener?s=${tString}&fd=7`;
       
       try {
-        const html = await fetchWithProxy(oiUrl);
+        // Solicitamos tipo 'html' para que valide que OpenInsider ha cargado correctamente
+        const html = await fetchWithProxy(oiUrl, 'html');
         const parser = new DOMParser();
         const doc = parser.parseFromString(html, 'text/html');
         
