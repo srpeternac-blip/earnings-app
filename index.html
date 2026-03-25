@@ -184,7 +184,10 @@
           <div class="card" style="margin-bottom: 0;">
             <div class="card-label">Estado</div>
             <div class="status-pill loading" id="sheetStatus">⏳ Conectando...</div>
-            <div style="margin-top: 16px;"><button class="btn btn-ghost" onclick="init()">↻ Forzar recarga</button></div>
+            <div style="margin-top: 16px; display: flex; gap: 8px;">
+              <button class="btn btn-ghost" onclick="init()">↻ Forzar recarga</button>
+              <button class="btn btn-ghost" style="color: var(--red); border-color: var(--red);" onclick="stopAllTasks()">🛑 Detener tareas</button>
+            </div>
           </div>
         </div>
         
@@ -213,7 +216,7 @@
     <div class="page" id="page-resultados">
       <div class="page-header"><h2>Calendario de Resultados</h2></div>
       <div class="search-bar-row">
-        <button class="btn btn-primary" id="btnSearch" onclick="fetchEarnings(false)">▶ ACTUALIZAR EARNINGS</button>
+        <button class="btn btn-primary" id="btnSearch" onclick="fetchEarnings(false, activeRequests.signal)">▶ ACTUALIZAR EARNINGS</button>
         <span class="search-info" id="searchInfo">Sincronizado automáticamente al inicio.</span>
       </div>
 
@@ -237,7 +240,7 @@
     <div class="page" id="page-insiders">
       <div class="page-header"><h2>Movimientos de Insiders</h2></div>
       <div class="search-bar-row">
-        <button class="btn btn-primary" id="btnInsiders" onclick="fetchInsiders(false)">▶ ACTUALIZAR INSIDERS</button>
+        <button class="btn btn-primary" id="btnInsiders" onclick="fetchInsiders(false, activeRequests.signal)">▶ ACTUALIZAR INSIDERS</button>
         <span class="search-info" id="insiderInfo">Sincronizado automáticamente al inicio (Última semana).</span>
       </div>
       <div id="insidersContainer"></div>
@@ -257,13 +260,27 @@ let currentSort = { column: 'name', asc: true };
 let earningsAlerts = new Set();
 let insiderAlerts = new Set();
 
+// Control de interrupción de tareas
+let activeRequests = new AbortController();
+
+function stopAllTasks() {
+  activeRequests.abort();
+  document.getElementById('sheetStatus').textContent = '🛑 Tareas detenidas por el usuario';
+  document.getElementById('sheetStatus').className = 'status-pill err';
+  document.getElementById('btnSearch').disabled = false;
+  document.getElementById('btnSearch').textContent = '▶ ACTUALIZAR EARNINGS';
+  document.getElementById('btnInsiders').disabled = false;
+  document.getElementById('btnInsiders').textContent = '▶ ACTUALIZAR INSIDERS';
+  activeRequests = new AbortController(); // Resetear para la próxima vez
+}
+
 // --- TEMA OSCURO ---
 function toggleTheme() {
   document.body.classList.toggle('dark-theme');
   const isDark = document.body.classList.contains('dark-theme');
   localStorage.setItem('theme', isDark ? 'dark' : 'light');
   document.getElementById('btnTheme').textContent = isDark ? '☀️ Modo Claro' : '🌙 Modo Oscuro';
-  if(chartInstance) chartInstance.update(); // Refrescar colores del gráfico
+  if(chartInstance) chartInstance.update();
 }
 
 if (localStorage.getItem('theme') === 'dark') {
@@ -272,41 +289,73 @@ if (localStorage.getItem('theme') === 'dark') {
 }
 
 // --- FUNCIÓN RED ESTRICTA ---
-async function fetchApiJson(url) {
+async function fetchApiJson(url, signal) {
   const proxiesJson = [
-    u => `https://corsproxy.io/?${encodeURIComponent(u)}`,
-    u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`
+    u => `https://api.allorigins.win/get?url=${encodeURIComponent(u)}`, // Devuelve JSON seguro con 'contents'
+    u => `https://corsproxy.io/?${encodeURIComponent(u)}`
   ];
   let lastErr = '';
   for (const proxyFn of proxiesJson) {
     try {
-      const res = await fetch(proxyFn(url), { headers: { 'Accept': 'application/json' }});
+      if (signal && signal.aborted) throw new Error("Cancelado por el usuario");
+      const res = await fetch(proxyFn(url), { headers: { 'Accept': 'application/json' }, signal: signal });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = JSON.parse(await res.text()); 
+      const json = await res.json();
+      
+      // Para AllOrigins
+      if (json && json.contents) {
+         try { return JSON.parse(json.contents); } catch(e) {}
+      }
+      // Para corsproxy directo
       if (json) return json; 
     } catch (e) { lastErr = e.message; }
   }
   throw new Error(lastErr);
 }
 
-// --- UTILIDADES ---
+// --- UTILIDADES DECLARADAS COMO FUNCIONES (Previene ReferenceError) ---
 function toYahoo(raw) {
   if(!raw) return null;
   const c = raw.trim();
   if(c.includes(':')) { const [e,s] = c.split(':'); const x = XMAP[e.toLowerCase()]; return x ? s.toUpperCase()+x : s.toUpperCase(); }
   return c.toUpperCase();
 }
-function base(t) { return t.split('.')[0].toUpperCase(); }
+
+function base(t) { 
+  return t.split('.')[0].toUpperCase(); 
+}
+
 function getWeekDates(offset=0) {
-  const today = new Date(), day = today.getDay();
+  const today = new Date();
+  const day = today.getDay();
   const mon = new Date(today);
   mon.setDate(today.getDate() - (day === 0 ? 6 : day - 1) + offset * 7);
-  return Array.from({length: 5}, (_, i) => { const d = new Date(mon); d.setDate(mon.getDate() + i); return d; });
+  return Array.from({length: 5}, (_, i) => { 
+    const d = new Date(mon); 
+    d.setDate(mon.getDate() + i); 
+    return d; 
+  });
 }
-const fmtES = d => d.toLocaleDateString('es-ES', { day: '2-digit', month: 'short' });
-const toISO = d => d.toISOString().split('T')[0];
 
-const CW = getWeekDates(0), NW = getWeekDates(1);
+function fmtES(d) {
+  return d.toLocaleDateString('es-ES', { day: '2-digit', month: 'short' });
+}
+
+function toISO(d) {
+  return d.toISOString().split('T')[0];
+}
+
+function fmtTime() {
+  return new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+}
+
+function isToday(d) {
+  return d.toDateString() === new Date().toDateString();
+}
+
+const CW = getWeekDates(0);
+const NW = getWeekDates(1);
+
 document.getElementById('subCurrent').textContent = `${fmtES(CW[0])} — ${fmtES(CW[4])}`;
 document.getElementById('subNext').textContent = `${fmtES(NW[0])} — ${fmtES(NW[4])}`;
 
@@ -327,12 +376,16 @@ function parseCSVLine(line) {
 }
 
 async function init() {
+  activeRequests.abort(); // Parar todo lo que estuviera corriendo
+  activeRequests = new AbortController();
+  const signal = activeRequests.signal;
+
   const el = document.getElementById('sheetStatus');
   el.className = 'status-pill loading'; el.textContent = '⏳ Sincronizando...';
   companies = []; earningsAlerts.clear(); insiderAlerts.clear();
   
   try {
-    const res = await fetch(SHEET_CSV + '&t=' + Date.now());
+    const res = await fetch(SHEET_CSV + '&t=' + Date.now(), { signal });
     if(!res.ok) throw new Error('Error HTTP ' + res.status);
     const lines = (await res.text()).trim().split('\n');
     const seen = new Set();
@@ -358,16 +411,18 @@ async function init() {
     
     sortTable('name'); 
     
-    // Disparar las tareas de fondo de forma SECUENCIAL para evitar saturar la red y los proxies
-    fetchEarnings(true).then(() => {
-      return fetchInsiders(true);
-    }).then(() => {
-      // Pausamos antes de lanzar los sectores
-      setTimeout(loadSectors, 2000);
-    });
+    // Disparar las tareas de forma SECUENCIAL con el signal de aborto
+    fetchEarnings(true, signal)
+      .then(() => fetchInsiders(true, signal))
+      .then(() => setTimeout(() => loadSectors(signal), 1500))
+      .catch(e => {
+         if(e.message !== "Cancelado por el usuario") console.error(e);
+      });
 
   } catch(e) {
-    el.className = 'status-pill err'; el.textContent = `⚠️ Error: ${e.message}`;
+    if(e.name !== 'AbortError') {
+      el.className = 'status-pill err'; el.textContent = `⚠️ Error: ${e.message}`;
+    }
   }
 }
 
@@ -408,32 +463,35 @@ function renderCarteraTable() {
   });
 }
 
-// --- GRÁFICO SECTORIAL (Progresivo para no saturar) ---
-async function fetchSectorSafe(ticker) {
+// --- GRÁFICO SECTORIAL (Pausado para no saturar) ---
+async function fetchSectorSafe(ticker, signal) {
   try {
-    const json = await fetchApiJson(`https://query2.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(ticker)}?modules=assetProfile`);
+    const json = await fetchApiJson(`https://query2.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(ticker)}?modules=assetProfile`, signal);
     if(json?.quoteSummary?.result?.[0]?.assetProfile?.sector) return json.quoteSummary.result[0].assetProfile.sector;
   } catch(e) {}
   return 'Desconocido / Otros';
 }
 
-async function loadSectors() {
+async function loadSectors(signal) {
   document.getElementById('chartCard').style.display = 'flex';
   const sectorsCount = {};
   
-  // Procesamiento por lotes pequeños (3 empresas a la vez) con pausa mayor para cuidar los proxies
-  for(let i = 0; i < companies.length; i += 3) {
-    const batch = companies.slice(i, i + 3);
-    await Promise.all(batch.map(async c => {
-      if(c.sector === 'Cargando...') {
-        c.sector = await fetchSectorSafe(c.yahooTicker);
-      }
-      sectorsCount[c.sector] = (sectorsCount[c.sector] || 0) + 1;
-    }));
+  // En lugar de lotes de 3, vamos 1 a 1 de forma constante y segura
+  for(let i = 0; i < companies.length; i++) {
+    if (signal && signal.aborted) return;
     
-    renderCarteraTable();
-    updateChart(sectorsCount);
-    await new Promise(r => setTimeout(r, 1500)); // Pausa de 1.5s entre lotes
+    const c = companies[i];
+    if(c.sector === 'Cargando...') {
+      c.sector = await fetchSectorSafe(c.yahooTicker, signal);
+    }
+    sectorsCount[c.sector] = (sectorsCount[c.sector] || 0) + 1;
+    
+    // Actualizamos la tabla de 2 en 2 para que sea fluido
+    if(i % 2 === 0 || i === companies.length - 1) {
+       renderCarteraTable();
+       updateChart(sectorsCount);
+    }
+    await new Promise(r => setTimeout(r, 800)); // 0.8s entre peticiones es seguro
   }
 }
 
@@ -474,7 +532,7 @@ function toggleWeek(w) {
 }
 
 // --- EARNINGS ---
-async function fetchEarnings(isBackground = false) {
+async function fetchEarnings(isBackground = false, signal = activeRequests.signal) {
   if(!companies.length) return;
   const btn = document.getElementById('btnSearch');
   if(!isBackground) { btn.disabled = true; btn.textContent = '⏳ BUSCANDO...'; }
@@ -487,7 +545,7 @@ async function fetchEarnings(isBackground = false) {
 
   const settled = await Promise.allSettled([...CW, ...NW].map(d => {
     const dISO = toISO(d);
-    return fetchApiJson(`https://api.nasdaq.com/api/calendar/earnings?date=${dISO}`)
+    return fetchApiJson(`https://api.nasdaq.com/api/calendar/earnings?date=${dISO}`, signal)
       .then(json => (json?.data?.rows || []).flatMap(row => {
         const t = (row.symbol||'').toUpperCase().trim();
         const comp = t ? (lookup.get(t) || lookup.get(t.split('.')[0])) : null;
@@ -501,9 +559,27 @@ async function fetchEarnings(isBackground = false) {
       }));
   }));
 
+  if (signal && signal.aborted) return;
+
   const results = [];
-  settled.forEach(r => { if(r.status === 'fulfilled') results.push(...r.value); });
-  
+  let errorCount = 0;
+  let lastErrorMsg = '';
+
+  settled.forEach(r => { 
+    if(r.status === 'fulfilled') {
+      results.push(...r.value); 
+    } else {
+      errorCount++;
+      lastErrorMsg = r.reason.message;
+    }
+  });
+
+  if (errorCount === [...CW, ...NW].length && lastErrorMsg !== "Cancelado por el usuario") {
+    document.getElementById('searchInfo').innerHTML = `<span style="color:var(--red)">⚠️ Fallo de conexión: ${lastErrorMsg}</span>`;
+    btn.disabled = false; btn.textContent = '▶ ACTUALIZAR EARNINGS';
+    return;
+  }
+
   const unique = results.filter((r, i, a) => a.findIndex(x => x.ticker === r.ticker) === i).sort((a,b) => a.name.localeCompare(b.name));
   const curr = unique.filter(r => CW.some(d => toISO(d) === r.date));
   const next = unique.filter(r => NW.some(d => toISO(d) === r.date));
@@ -515,7 +591,8 @@ async function fetchEarnings(isBackground = false) {
   renderWeek('Current', curr, CW); renderWeek('Next', next, NW);
   ['Current','Next'].forEach(w => { document.getElementById('toggle'+w).classList.add('open'); document.getElementById('body'+w).classList.add('open'); });
 
-  document.getElementById('searchInfo').textContent = `✓ Sincronizado: ${curr.length} esta semana, ${next.length} la próxima.`;
+  const errorTxt = errorCount > 0 ? ` (Atención: fallaron ${errorCount} días por saturación)` : '';
+  document.getElementById('searchInfo').textContent = `✓ Sincronizado: ${curr.length} esta semana, ${next.length} la próxima.${errorTxt}`;
   if(!isBackground) { btn.disabled = false; btn.textContent = '▶ ACTUALIZAR EARNINGS'; }
 }
 
@@ -541,7 +618,7 @@ function renderWeek(which, items, weekDates) {
 }
 
 // --- INSIDERS ---
-async function fetchInsiders(isBackground = false) {
+async function fetchInsiders(isBackground = false, signal = activeRequests.signal) {
   if(!companies.length) return;
   const btn = document.getElementById('btnInsiders');
   if(!isBackground) { btn.disabled = true; btn.textContent = '⏳ CONECTANDO...'; }
@@ -553,12 +630,12 @@ async function fetchInsiders(isBackground = false) {
   try {
     const tradesByTicker = {};
     let totalTrades = 0;
-    const maxDaysAgo = 7; // Ampliado a 7 días (1 semana)
+    const maxDaysAgo = 7; // 1 semana
     const nowMs = Date.now();
 
     await Promise.allSettled(usTickers.map(async (comp) => {
       try {
-        const json = await fetchApiJson(`https://api.nasdaq.com/api/company/${base(comp.yahooTicker).toLowerCase()}/insider-trades?limit=20&type=ALL`);
+        const json = await fetchApiJson(`https://api.nasdaq.com/api/company/${base(comp.yahooTicker).toLowerCase()}/insider-trades?limit=50&type=ALL`, signal);
         const rows = json?.data?.transactionTable?.table?.rows || [];
         if (rows.length === 0) return;
 
@@ -577,11 +654,13 @@ async function fetchInsiders(isBackground = false) {
           const price = parseFloat((row.lastPrice || '0').replace(/,/g, ''));
           const totalValueNum = (shares * price) || 0;
           
-          if (totalValueNum < 10000) return; // Filtro de ruido
+          // Filtro bajado a 1.000$ para eliminar ruido absurdo y detectar compras pequeñas
+          if (totalValueNum < 1000) return; 
 
           let relevance = 'Media';
           let relColor = 'var(--bmo)';
           if (totalValueNum >= 100000) { relevance = 'Considerable'; relColor = 'var(--accent)'; }
+          else if (totalValueNum < 10000) { relevance = 'Ridícula'; relColor = 'var(--muted)'; }
 
           validTxs.push({
             date: row.lastDate, insider: row.insider || 'Desconocido', title: row.relation || '—',
@@ -598,6 +677,8 @@ async function fetchInsiders(isBackground = false) {
       } catch(e) {} 
     }));
 
+    if (signal && signal.aborted) return;
+
     const activeTickers = Object.keys(tradesByTicker);
     
     // Actualizar Alertas
@@ -605,7 +686,7 @@ async function fetchInsiders(isBackground = false) {
     renderCarteraTable();
 
     if(activeTickers.length === 0) {
-      container.innerHTML = `<div class="card"><p style="color:var(--muted)">No se han registrado operaciones significativas (>${10000}$) en los últimos 7 días.</p></div>`;
+      container.innerHTML = `<div class="card"><p style="color:var(--muted)">No se han registrado operaciones superiores a $1.000 en los últimos 7 días.</p></div>`;
     } else {
       let globalHtml = '';
       activeTickers.forEach(ticker => {
@@ -633,10 +714,10 @@ async function fetchInsiders(isBackground = false) {
       });
       container.innerHTML = globalHtml;
     }
-    document.getElementById('insiderInfo').textContent = `✓ Actualizado: ${totalTrades} operaciones significativas (Última semana).`;
+    document.getElementById('insiderInfo').textContent = `✓ Actualizado: ${totalTrades} operaciones (Última semana).`;
 
   } catch(err) {
-    if(!isBackground) container.innerHTML = `<div class="card"><p style="color:var(--red)">⚠️ Error interno: ${err.message}</p></div>`;
+    if(!isBackground && err.message !== "Cancelado por el usuario") container.innerHTML = `<div class="card"><p style="color:var(--red)">⚠️ Error interno: ${err.message}</p></div>`;
   }
   if(!isBackground) { btn.disabled = false; btn.textContent = '▶ ACTUALIZAR INSIDERS'; }
 }
