@@ -7,9 +7,10 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<!-- Añadimos Chart.js para el gráfico sectorial -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <style>
   :root {
-    /* Tema Intermedio: Fondo gris suave, tarjetas blancas, texto oscuro legible */
     --bg: #f1f5f9;
     --surface: #ffffff;
     --surface2: #f8fafc;
@@ -19,9 +20,9 @@
     --text: #0f172a;
     --muted: #64748b;
     
-    --bmo: #d97706; /* Pre-mercado (Ámbar) */
-    --amc: #7c3aed; /* Post-mercado (Violeta) */
-    --dmh: #059669; /* Durante (Verde) */
+    --bmo: #d97706; 
+    --amc: #7c3aed; 
+    --dmh: #059669; 
     --red: #dc2626;
     --green: #16a34a;
     
@@ -55,7 +56,6 @@
   
   .page-header { margin-bottom: 32px; }
   .page-header h2 { font-size: 24px; font-weight: 700; color: var(--text); letter-spacing: -0.5px; }
-  .page-header p { font-size: 14px; color: var(--muted); margin-top: 6px; }
 
   /* Cards & General Elements */
   .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 24px; margin-bottom: 20px; box-shadow: var(--shadow); }
@@ -74,11 +74,15 @@
   .status-pill.err { color: var(--red); }
   .status-pill.loading { color: var(--accent); }
 
-  /* Cartera Stats */
-  .cartera-stats { display: flex; gap: 20px; margin-bottom: 20px; }
-  .stat-box { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px; flex: 1; box-shadow: var(--shadow); }
+  /* Cartera Stats & Layout */
+  .cartera-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
+  .cartera-stats { display: flex; flex-direction: column; gap: 20px; }
+  .stat-box { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px; box-shadow: var(--shadow); }
   .stat-val { font-size: 28px; font-weight: 700; color: var(--accent); line-height: 1; }
   .stat-lbl { font-size: 13px; color: var(--muted); margin-top: 6px; font-weight: 500; }
+  
+  .chart-container { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px; box-shadow: var(--shadow); height: 100%; min-height: 250px; display: flex; flex-direction: column; }
+  .chart-wrapper { flex: 1; position: relative; width: 100%; display: flex; justify-content: center; align-items: center; }
 
   /* Tables */
   .company-table { width: 100%; border-collapse: collapse; }
@@ -163,7 +167,7 @@
     <div class="nav-item" onclick="goTo('resultados')" id="nav-resultados"><span class="nav-icon">📅</span> Resultados</div>
     <div class="nav-item" onclick="goTo('insiders')" id="nav-insiders"><span class="nav-icon">🔍</span> Insiders</div>
     <div class="sidebar-footer">
-      <p><b>Fuentes:</b><br>Cartera: Google Sheets<br>Earnings: NASDAQ API<br>Insiders: Yahoo Finance API</p>
+      <p><b>Fuentes:</b><br>Cartera: Google Sheets<br>Earnings: NASDAQ API<br>Insiders: NASDAQ API</p>
     </div>
   </nav>
   
@@ -172,17 +176,28 @@
     <div class="page active" id="page-cartera">
       <div class="page-header">
         <h2>Mi Cartera</h2>
-        <p>Sincronizada automáticamente desde tu documento de Google Sheets.</p>
       </div>
-      <div class="cartera-stats">
-        <div class="stat-box"><div class="stat-val" id="statTotal">—</div><div class="stat-lbl">Empresas analizadas</div></div>
-        <div class="stat-box"><div class="stat-val" id="statTime">—</div><div class="stat-lbl">Última sincronización</div></div>
+      
+      <div class="cartera-grid">
+        <div class="cartera-stats">
+          <div class="stat-box"><div class="stat-val" id="statTotal">—</div><div class="stat-lbl">Empresas analizadas</div></div>
+          <div class="stat-box"><div class="stat-val" id="statTime">—</div><div class="stat-lbl">Última sincronización</div></div>
+          <div class="card" style="margin-bottom: 0;">
+            <div class="card-label">Estado de conexión</div>
+            <div class="status-pill loading" id="sheetStatus">⏳ Conectando con Google Sheets...</div>
+            <div style="margin-top: 16px;"><button class="btn btn-ghost" onclick="init()">↻ Forzar recarga</button></div>
+          </div>
+        </div>
+        
+        <!-- Contenedor del Gráfico Sectorial -->
+        <div class="chart-container" id="chartCard" style="display:none;">
+          <div class="card-label">Distribución Sectorial</div>
+          <div class="chart-wrapper">
+            <canvas id="sectorChart"></canvas>
+          </div>
+        </div>
       </div>
-      <div class="card">
-        <div class="card-label">Estado de conexión</div>
-        <div class="status-pill loading" id="sheetStatus">⏳ Conectando con Google Sheets...</div>
-        <div style="margin-top: 16px;"><button class="btn btn-ghost" onclick="init()">↻ Forzar recarga</button></div>
-      </div>
+
       <div class="card" id="tableCard" style="display:none">
         <table class="company-table">
           <thead><tr><th>Ticker detectado</th><th>Nombre de la Empresa</th></tr></thead>
@@ -195,7 +210,6 @@
     <div class="page" id="page-resultados">
       <div class="page-header">
         <h2>Calendario de Resultados</h2>
-        <p id="resultsSubtitle">—</p>
       </div>
       <div class="search-bar-row">
         <button class="btn btn-primary" id="btnSearch" onclick="fetchEarnings()">▶ BUSCAR EARNINGS</button>
@@ -236,11 +250,10 @@
     <div class="page" id="page-insiders">
       <div class="page-header">
         <h2>Movimientos de Insiders</h2>
-        <p id="insiderSubtitle">Compras y ventas de mercado reportadas en los últimos 14 días (API: Yahoo Finance)</p>
       </div>
       <div class="search-bar-row">
         <button class="btn btn-primary" id="btnInsiders" onclick="fetchInsiders()">▶ BUSCAR INSIDERS</button>
-        <span class="search-info" id="insiderInfo">Conexión directa a base de datos para todas las empresas de tu cartera.</span>
+        <span class="search-info" id="insiderInfo">Conexión a la API de NASDAQ para movimientos de los últimos 14 días.</span>
       </div>
       <div id="insidersContainer"></div>
     </div>
@@ -253,11 +266,11 @@ const SHEET_CSV = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSXSofvMaT7bY
 const DAYS_ES = ['Lunes','Martes','Miércoles','Jueves','Viernes'];
 const XMAP = {'lon':'.L','lse':'.L','epa':'.PA','ams':'.AS','bru':'.BR','asx':'.AX','tse':'.TO','tsx':'.TO','cve':'.V','bit':'.MI','xetr':'.DE','fra':'.DE','bme':'.MC','swx':'.SW','hkex':'.HK','tyo':'.T','nse':'.NS','bse':'.BO'};
 
-// --- CONEXIONES API ESTRICTAS ---
+// Instancia global del gráfico
+let chartInstance = null;
 
-// 1. Fetch estricto para JSON (Earnings de NASDAQ)
-async function fetchNasdaqJson(dateISO) {
-  const url = `https://api.nasdaq.com/api/calendar/earnings?date=${dateISO}`;
+// --- FUNCIÓN GENÉRICA ESTRICTA PARA APIS (Retorna JSON validado) ---
+async function fetchApiJson(url) {
   const proxiesJson = [
     u => `https://corsproxy.io/?${encodeURIComponent(u)}`,
     u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`
@@ -270,38 +283,12 @@ async function fetchNasdaqJson(dateISO) {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const text = await res.text();
       const json = JSON.parse(text); 
-      if (json && json.data) return json; 
+      if (json) return json; 
     } catch (e) {
       lastErr = e.message;
     }
   }
   throw new Error(`Error en proxies: ${lastErr}`);
-}
-
-// 2. Fetch estricto para JSON de Yahoo Finance (Insiders)
-async function fetchYahooInsiders(yahooTicker) {
-  const url = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(yahooTicker)}?modules=insiderTransactions`;
-  const proxiesJson = [
-    u => `https://corsproxy.io/?${encodeURIComponent(u)}`,
-    u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`
-  ];
-
-  for (const proxyFn of proxiesJson) {
-    try {
-      const res = await fetch(proxyFn(url), { headers: { 'Accept': 'application/json' }});
-      if (!res.ok) continue;
-      const json = await res.json();
-      
-      // Verificación estricta de que la respuesta tenga datos
-      if (json && json.quoteSummary && json.quoteSummary.result && json.quoteSummary.result.length > 0) {
-        const insiderData = json.quoteSummary.result[0].insiderTransactions;
-        if (insiderData && insiderData.transactions) {
-          return insiderData.transactions;
-        }
-      }
-    } catch (e) {}
-  }
-  return []; // Retorna vacío si falla o la empresa no tiene datos
 }
 
 // --- UTILIDADES ---
@@ -331,7 +318,6 @@ const CW = getWeekDates(0), NW = getWeekDates(1);
 
 document.getElementById('subCurrent').textContent = `${fmtES(CW[0])} — ${fmtES(CW[4])}`;
 document.getElementById('subNext').textContent = `${fmtES(NW[0])} — ${fmtES(NW[4])}`;
-document.getElementById('resultsSubtitle').textContent = `Semana actual (${fmtES(CW[0])}) y semana siguiente (${fmtES(NW[0])})`;
 
 function goTo(page) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
@@ -358,6 +344,7 @@ async function init() {
   const el = document.getElementById('sheetStatus');
   el.className = 'status-pill loading'; el.textContent = '⏳ Sincronizando cartera desde Google Sheets...';
   document.getElementById('tableCard').style.display = 'none';
+  document.getElementById('chartCard').style.display = 'none';
   companies = [];
   try {
     const res = await fetch(SHEET_CSV + '&t=' + Date.now());
@@ -395,9 +382,85 @@ async function init() {
     
     document.getElementById('tableCard').style.display = 'block';
     el.className = 'status-pill ok'; el.textContent = `✓ Conexión establecida. ${companies.length} empresas cargadas.`;
+    
+    // Cargar los sectores en segundo plano para el gráfico
+    loadSectors();
+
   } catch(e) {
     el.className = 'status-pill err'; el.textContent = `⚠️ Error: ${e.message}`;
   }
+}
+
+async function fetchSectorSafe(ticker) {
+  const url = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(ticker)}?modules=assetProfile`;
+  try {
+    const json = await fetchApiJson(url);
+    if(json?.quoteSummary?.result?.[0]?.assetProfile?.sector) {
+      return json.quoteSummary.result[0].assetProfile.sector;
+    }
+  } catch(e) {}
+  return 'Desconocido / Otros';
+}
+
+async function loadSectors() {
+  document.getElementById('chartCard').style.display = 'flex';
+  const ctx = document.getElementById('sectorChart').getContext('2d');
+  
+  const sectors = {};
+  // Cargamos en pequeños lotes paralelos para no saturar
+  const batchSize = 5;
+  for(let i = 0; i < companies.length; i += batchSize) {
+    const batch = companies.slice(i, i + batchSize);
+    await Promise.all(batch.map(async c => {
+      const sector = await fetchSectorSafe(c.yahooTicker);
+      sectors[sector] = (sectors[sector] || 0) + 1;
+    }));
+  }
+
+  // Ordenar de mayor a menor
+  const sortedSectors = Object.entries(sectors).sort((a,b) => b[1] - a[1]);
+  const labels = sortedSectors.map(s => s[0]);
+  const data = sortedSectors.map(s => s[1]);
+
+  if(chartInstance) chartInstance.destroy();
+  
+  chartInstance = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: labels,
+      datasets: [{
+        data: data,
+        backgroundColor: [
+          '#0ea5e9', '#10b981', '#8b5cf6', '#f59e0b', '#ef4444', 
+          '#64748b', '#14b8a6', '#f97316', '#6366f1', '#ec4899'
+        ],
+        borderWidth: 2,
+        borderColor: '#ffffff'
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      cutout: '65%',
+      plugins: {
+        legend: {
+          position: 'right',
+          labels: { color: '#475569', font: { family: 'Inter', size: 11 }, padding: 15, usePointStyle: true, pointStyle: 'circle' }
+        },
+        tooltip: {
+          backgroundColor: '#0f172a', titleFont: { family: 'Inter' }, bodyFont: { family: 'Inter' },
+          callbacks: {
+            label: function(context) {
+              const count = context.raw;
+              const total = context.dataset.data.reduce((a, b) => a + b, 0);
+              const percentage = Math.round((count / total) * 100);
+              return ` ${count} empresas (${percentage}%)`;
+            }
+          }
+        }
+      }
+    }
+  });
 }
 
 function toggleWeek(w) {
@@ -423,7 +486,8 @@ async function fetchEarnings() {
   
   const settled = await Promise.allSettled(allDates.map(d => {
     const dISO = toISO(d);
-    return fetchNasdaqJson(dISO)
+    const url = `https://api.nasdaq.com/api/calendar/earnings?date=${dISO}`;
+    return fetchApiJson(url)
       .then(json => (json?.data?.rows || []).flatMap(row => {
         const t = (row.symbol||'').toUpperCase().trim();
         if(!t) return [];
@@ -461,7 +525,7 @@ async function fetchEarnings() {
   });
 
   if (errorCount === allDates.length) {
-    document.getElementById('searchInfo').innerHTML = `<span style="color:var(--red)">⚠️ Fallo total de conexión: ${lastErrorMsg}</span>`;
+    document.getElementById('searchInfo').innerHTML = `<span style="color:var(--red)">⚠️ Fallo de conexión: ${lastErrorMsg}</span>`;
     btn.disabled = false; btn.textContent = '▶ BUSCAR EARNINGS';
     return;
   }
@@ -481,7 +545,7 @@ async function fetchEarnings() {
     document.getElementById('body'+w).classList.add('open');
   });
 
-  const errorTxt = errorCount > 0 ? ` (Atención: fallaron ${errorCount} días por saturación)` : '';
+  const errorTxt = errorCount > 0 ? ` (Atención: fallaron ${errorCount} días por saturación del servidor)` : '';
   document.getElementById('searchInfo').textContent = `✓ Búsqueda completada: ${curr.length} empresas esta semana, ${next.length} la próxima.${errorTxt}`;
   btn.disabled = false; btn.textContent = '▶ BUSCAR EARNINGS';
 }
@@ -526,13 +590,14 @@ function renderWeek(which, items, weekDates) {
   bodyEl.innerHTML = html;
 }
 
-// --- INSIDERS (Yahoo Finance API) ---
+// --- INSIDERS (API DIRECTA DE NASDAQ) ---
 async function fetchInsiders() {
   if(!companies.length) { alert('Carga la cartera primero.'); return; }
   const btn = document.getElementById('btnInsiders');
   btn.disabled = true; btn.textContent = '⏳ CONECTANDO...';
   
-  document.getElementById('insiderInfo').textContent = `Consultando la base de datos de Yahoo Finance para ${companies.length} empresas...`;
+  const usTickers = companies.filter(c => !c.yahooTicker.includes('.'));
+  document.getElementById('insiderInfo').textContent = `Consultando la base de datos de NASDAQ para ${usTickers.length} empresas USA...`;
   const container = document.getElementById('insidersContainer');
   container.innerHTML = '';
 
@@ -540,49 +605,60 @@ async function fetchInsiders() {
     const tradesByTicker = {};
     let totalTrades = 0;
     
-    // Filtro de tiempo: Transacciones de los últimos 14 días
-    const fourteenDaysAgo = (Date.now() / 1000) - (14 * 24 * 3600);
+    // Filtro de 14 días
+    const maxDaysAgo = 14;
+    const nowMs = Date.now();
 
-    // Consultamos todas las empresas en paralelo, ya que usamos JSON no saturamos los servidores igual
-    await Promise.allSettled(companies.map(async (comp) => {
-      const txs = await fetchYahooInsiders(comp.yahooTicker);
-      if (!txs || txs.length === 0) return;
-
-      const validTxs = [];
+    // Consultamos todas en paralelo usando la API interna de NASDAQ (muy robusta y en formato JSON puro)
+    await Promise.allSettled(usTickers.map(async (comp) => {
+      const ticker = base(comp.yahooTicker).toLowerCase();
+      const url = `https://api.nasdaq.com/api/company/${ticker}/insider-trades?limit=50&type=ALL`;
       
-      txs.forEach(t => {
-        // Filtrar por fecha
-        if (!t.startDate || !t.startDate.raw || t.startDate.raw < fourteenDaysAgo) return;
+      try {
+        const json = await fetchApiJson(url);
+        const rows = json?.data?.transactionTable?.table?.rows || [];
+        if (rows.length === 0) return;
 
-        const txt = (t.transactionText || '').toLowerCase();
+        const validTxs = [];
         
-        // Solo nos interesan operaciones de mercado abierto directas (Sale / Purchase)
-        const isSale = txt.includes('sale') || txt.includes('sold');
-        const isBuy = txt.includes('purchase') || txt.includes('buy') || txt.includes('bought');
-        
-        if (!isSale && !isBuy) return; // Omitimos "Option Exercise" u otros formatos raros
+        rows.forEach(row => {
+          if(!row.lastDate || !row.transactionType) return;
+          
+          // Filtrar por fecha (NASDAQ devuelve formato MM/DD/YYYY)
+          const txDate = new Date(row.lastDate);
+          const diffDays = (nowMs - txDate.getTime()) / (1000 * 3600 * 24);
+          if (diffDays > maxDaysAgo) return;
 
-        // Extracción limpia del precio si existe en el texto (ej: "Sale at price 173.97")
-        let price = '—';
-        const priceMatch = txt.match(/price\s+([\d.,]+)/i);
-        if (priceMatch) price = '$' + priceMatch[1];
+          const type = row.transactionType.toLowerCase();
+          const isSale = type.includes('sell') || type.includes('sale');
+          const isBuy = type.includes('buy') || type.includes('purchase');
+          if (!isSale && !isBuy) return; 
 
-        validTxs.push({
-          date: t.startDate.fmt || '—',
-          insider: t.filerName || 'Desconocido',
-          title: t.filerRelation || '—',
-          typeText: isSale ? 'Venta' : 'Compra',
-          isSale: isSale,
-          price: price,
-          qty: t.shares?.fmt || '—',
-          value: t.value?.fmt || '—'
+          // Formateo del valor total
+          const shares = parseFloat((row.sharesTraded || '0').replace(/,/g, ''));
+          const price = parseFloat((row.lastPrice || '0').replace(/,/g, ''));
+          let totalValue = '—';
+          if (!isNaN(shares) && !isNaN(price) && shares > 0 && price > 0) {
+             totalValue = '$' + (shares * price).toLocaleString('en-US', {maximumFractionDigits: 0});
+          }
+
+          validTxs.push({
+            date: row.lastDate,
+            insider: row.insider || 'Desconocido',
+            title: row.relation || '—',
+            typeText: isSale ? 'Venta' : 'Compra',
+            isSale: isSale,
+            price: row.lastPrice ? '$' + row.lastPrice : '—',
+            qty: row.sharesTraded || '—',
+            value: totalValue
+          });
         });
-      });
 
-      if (validTxs.length > 0) {
-        tradesByTicker[comp.yahooTicker] = validTxs;
-        totalTrades += validTxs.length;
-      }
+        if (validTxs.length > 0) {
+          tradesByTicker[comp.yahooTicker] = validTxs;
+          totalTrades += validTxs.length;
+        }
+      } catch(e) {} // Silenciamos errores individuales para que el resto siga cargando
     }));
 
     const activeTickers = Object.keys(tradesByTicker);
@@ -591,7 +667,7 @@ async function fetchInsiders() {
       container.innerHTML = `<div class="card"><p style="color:var(--muted)">No se encontraron compras ni ventas de mercado por parte de Insiders en los últimos 14 días para tu cartera.</p></div>`;
       document.getElementById('insiderInfo').textContent = `✓ Búsqueda completada. Sin movimientos recientes.`;
     } else {
-      document.getElementById('insiderInfo').textContent = `✓ Búsqueda completada: ${totalTrades} movimientos encontrados en ${activeTickers.length} empresas.`;
+      document.getElementById('insiderInfo').textContent = `✓ Búsqueda completada: ${totalTrades} movimientos encontrados en ${activeTickers.length} empresas (Últimos 14 días).`;
       
       activeTickers.forEach(ticker => {
         const comp = companies.find(c => c.yahooTicker === ticker);
@@ -607,7 +683,7 @@ async function fetchInsiders() {
             <span class="ins-badge">${trades.length} mov.</span>
           </div>
           <table class="ins-table">
-            <thead><tr><th>Fecha</th><th>Insider</th><th>Cargo</th><th>Operación</th><th>Precio</th><th>Acciones</th><th>Valor</th></tr></thead>
+            <thead><tr><th>Fecha</th><th>Insider</th><th>Cargo</th><th>Operación</th><th>Precio</th><th>Acciones</th><th>Valor Total</th></tr></thead>
             <tbody>
         `;
         
