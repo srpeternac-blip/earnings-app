@@ -163,7 +163,7 @@
     <div class="nav-item" onclick="goTo('resultados')" id="nav-resultados"><span class="nav-icon">📅</span> Resultados</div>
     <div class="nav-item" onclick="goTo('insiders')" id="nav-insiders"><span class="nav-icon">🔍</span> Insiders</div>
     <div class="sidebar-footer">
-      <p><b>Fuentes:</b><br>Cartera: Google Sheets<br>Earnings: NASDAQ API<br>Insiders: OpenInsider</p>
+      <p><b>Fuentes:</b><br>Cartera: Google Sheets<br>Earnings: NASDAQ API<br>Insiders: Yahoo Finance API</p>
     </div>
   </nav>
   
@@ -236,11 +236,11 @@
     <div class="page" id="page-insiders">
       <div class="page-header">
         <h2>Movimientos de Insiders</h2>
-        <p id="insiderSubtitle">Compras y ventas reportadas en los últimos 7 días (Fuente: OpenInsider)</p>
+        <p id="insiderSubtitle">Compras y ventas de mercado reportadas en los últimos 14 días (API: Yahoo Finance)</p>
       </div>
       <div class="search-bar-row">
         <button class="btn btn-primary" id="btnInsiders" onclick="fetchInsiders()">▶ BUSCAR INSIDERS</button>
-        <span class="search-info" id="insiderInfo">Extrae datos directamente de la tabla de OpenInsider.</span>
+        <span class="search-info" id="insiderInfo">Conexión directa a base de datos para todas las empresas de tu cartera.</span>
       </div>
       <div id="insidersContainer"></div>
     </div>
@@ -253,8 +253,7 @@ const SHEET_CSV = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSXSofvMaT7bY
 const DAYS_ES = ['Lunes','Martes','Miércoles','Jueves','Viernes'];
 const XMAP = {'lon':'.L','lse':'.L','epa':'.PA','ams':'.AS','bru':'.BR','asx':'.AX','tse':'.TO','tsx':'.TO','cve':'.V','bit':'.MI','xetr':'.DE','fra':'.DE','bme':'.MC','swx':'.SW','hkex':'.HK','tyo':'.T','nse':'.NS','bse':'.BO'};
 
-
-// --- NUEVAS FUNCIONES ESTRICTAS DE RED ---
+// --- CONEXIONES API ESTRICTAS ---
 
 // 1. Fetch estricto para JSON (Earnings de NASDAQ)
 async function fetchNasdaqJson(dateISO) {
@@ -279,27 +278,30 @@ async function fetchNasdaqJson(dateISO) {
   throw new Error(`Error en proxies: ${lastErr}`);
 }
 
-// 2. Fetch estricto para HTML (OpenInsider)
-async function fetchOpenInsiderHtml(oiUrl) {
-  // Estrategia A: AllOrigins en modo JSON (Carga todo el HTML y lo encapsula en una variable segura)
-  try {
-    const url1 = `https://api.allorigins.win/get?url=${encodeURIComponent(oiUrl)}`;
-    const res1 = await fetch(url1);
-    const data1 = await res1.json();
-    if (data1 && data1.contents && data1.contents.includes('tinytable')) {
-      return data1.contents;
-    }
-  } catch(e) {}
+// 2. Fetch estricto para JSON de Yahoo Finance (Insiders)
+async function fetchYahooInsiders(yahooTicker) {
+  const url = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(yahooTicker)}?modules=insiderTransactions`;
+  const proxiesJson = [
+    u => `https://corsproxy.io/?${encodeURIComponent(u)}`,
+    u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`
+  ];
 
-  // Estrategia B: corsproxy simple como respaldo
-  try {
-    const url2 = `https://corsproxy.io/?${encodeURIComponent(oiUrl)}`;
-    const res2 = await fetch(url2);
-    const text2 = await res2.text();
-    if (text2.includes('tinytable')) return text2;
-  } catch(e) {}
-  
-  throw new Error("Conexión rechazada por OpenInsider o bloqueada por los proxies.");
+  for (const proxyFn of proxiesJson) {
+    try {
+      const res = await fetch(proxyFn(url), { headers: { 'Accept': 'application/json' }});
+      if (!res.ok) continue;
+      const json = await res.json();
+      
+      // Verificación estricta de que la respuesta tenga datos
+      if (json && json.quoteSummary && json.quoteSummary.result && json.quoteSummary.result.length > 0) {
+        const insiderData = json.quoteSummary.result[0].insiderTransactions;
+        if (insiderData && insiderData.transactions) {
+          return insiderData.transactions;
+        }
+      }
+    } catch (e) {}
+  }
+  return []; // Retorna vacío si falla o la empresa no tiene datos
 }
 
 // --- UTILIDADES ---
@@ -524,72 +526,75 @@ function renderWeek(which, items, weekDates) {
   bodyEl.innerHTML = html;
 }
 
-// --- INSIDERS (OpenInsider Scraper) ---
+// --- INSIDERS (Yahoo Finance API) ---
 async function fetchInsiders() {
   if(!companies.length) { alert('Carga la cartera primero.'); return; }
   const btn = document.getElementById('btnInsiders');
-  btn.disabled = true; btn.textContent = '⏳ EXTRAYENDO...';
+  btn.disabled = true; btn.textContent = '⏳ CONECTANDO...';
   
-  const usTickers = companies.filter(c => !c.yahooTicker.includes('.'));
-  document.getElementById('insiderInfo').textContent = `Conectando con OpenInsider para ${usTickers.length} empresas...`;
+  document.getElementById('insiderInfo').textContent = `Consultando la base de datos de Yahoo Finance para ${companies.length} empresas...`;
   const container = document.getElementById('insidersContainer');
   container.innerHTML = '';
 
   try {
-    const chunkSize = 10;
     const tradesByTicker = {};
     let totalTrades = 0;
     
-    for (let i = 0; i < usTickers.length; i += chunkSize) {
-      const chunk = usTickers.slice(i, i + chunkSize);
-      const tString = chunk.map(t => t.yahooTicker.split('.')[0]).join('%2C');
-      const oiUrl = `http://openinsider.com/screener?s=${tString}&fd=7`;
+    // Filtro de tiempo: Transacciones de los últimos 14 días
+    const fourteenDaysAgo = (Date.now() / 1000) - (14 * 24 * 3600);
+
+    // Consultamos todas las empresas en paralelo, ya que usamos JSON no saturamos los servidores igual
+    await Promise.allSettled(companies.map(async (comp) => {
+      const txs = await fetchYahooInsiders(comp.yahooTicker);
+      if (!txs || txs.length === 0) return;
+
+      const validTxs = [];
       
-      try {
-        const html = await fetchOpenInsiderHtml(oiUrl);
-        const parser = new DOMParser();
-        const doc = parser.parseFromString(html, 'text/html');
+      txs.forEach(t => {
+        // Filtrar por fecha
+        if (!t.startDate || !t.startDate.raw || t.startDate.raw < fourteenDaysAgo) return;
+
+        const txt = (t.transactionText || '').toLowerCase();
         
-        const rows = doc.querySelectorAll('.tinytable tbody tr');
+        // Solo nos interesan operaciones de mercado abierto directas (Sale / Purchase)
+        const isSale = txt.includes('sale') || txt.includes('sold');
+        const isBuy = txt.includes('purchase') || txt.includes('buy') || txt.includes('bought');
         
-        rows.forEach(tr => {
-          const tds = tr.querySelectorAll('td');
-          if(tds.length < 12) return;
-          
-          const ticker = tds[3].textContent.trim().toUpperCase();
-          if(!tradesByTicker[ticker]) tradesByTicker[ticker] = [];
-          
-          const type = tds[7].textContent.trim();
-          const isSale = type.toLowerCase().includes('sale');
-          
-          tradesByTicker[ticker].push({
-            filingDate: tds[1].textContent.trim().split(' ')[0],
-            tradeDate: tds[2].textContent.trim(),
-            insider: tds[5].textContent.trim(),
-            title: tds[6].textContent.trim(),
-            typeText: isSale ? 'Venta' : 'Compra',
-            isSale: isSale,
-            price: tds[8].textContent.trim(),
-            qty: tds[9].textContent.trim(),
-            value: tds[12].textContent.trim()
-          });
-          totalTrades++;
+        if (!isSale && !isBuy) return; // Omitimos "Option Exercise" u otros formatos raros
+
+        // Extracción limpia del precio si existe en el texto (ej: "Sale at price 173.97")
+        let price = '—';
+        const priceMatch = txt.match(/price\s+([\d.,]+)/i);
+        if (priceMatch) price = '$' + priceMatch[1];
+
+        validTxs.push({
+          date: t.startDate.fmt || '—',
+          insider: t.filerName || 'Desconocido',
+          title: t.filerRelation || '—',
+          typeText: isSale ? 'Venta' : 'Compra',
+          isSale: isSale,
+          price: price,
+          qty: t.shares?.fmt || '—',
+          value: t.value?.fmt || '—'
         });
-      } catch (chunkError) {
-        console.warn(`Error procesando lote ${i}:`, chunkError);
+      });
+
+      if (validTxs.length > 0) {
+        tradesByTicker[comp.yahooTicker] = validTxs;
+        totalTrades += validTxs.length;
       }
-    }
+    }));
 
     const activeTickers = Object.keys(tradesByTicker);
     
     if(activeTickers.length === 0) {
-      container.innerHTML = `<div class="card"><p style="color:var(--muted)">No se encontraron movimientos en OpenInsider durante los últimos 7 días para las empresas consultadas.</p></div>`;
+      container.innerHTML = `<div class="card"><p style="color:var(--muted)">No se encontraron compras ni ventas de mercado por parte de Insiders en los últimos 14 días para tu cartera.</p></div>`;
       document.getElementById('insiderInfo').textContent = `✓ Búsqueda completada. Sin movimientos recientes.`;
     } else {
       document.getElementById('insiderInfo').textContent = `✓ Búsqueda completada: ${totalTrades} movimientos encontrados en ${activeTickers.length} empresas.`;
       
       activeTickers.forEach(ticker => {
-        const comp = companies.find(c => base(c.yahooTicker) === ticker);
+        const comp = companies.find(c => c.yahooTicker === ticker);
         const compName = comp ? comp.name : ticker;
         const trades = tradesByTicker[ticker];
         
@@ -602,15 +607,14 @@ async function fetchInsiders() {
             <span class="ins-badge">${trades.length} mov.</span>
           </div>
           <table class="ins-table">
-            <thead><tr><th>Fecha Form.</th><th>Fecha Op.</th><th>Insider</th><th>Cargo</th><th>Operación</th><th>Precio</th><th>Acciones</th><th>Valor</th></tr></thead>
+            <thead><tr><th>Fecha</th><th>Insider</th><th>Cargo</th><th>Operación</th><th>Precio</th><th>Acciones</th><th>Valor</th></tr></thead>
             <tbody>
         `;
         
         trades.forEach(t => {
           tHtml += `
             <tr>
-              <td class="ins-mono">${t.filingDate}</td>
-              <td class="ins-mono">${t.tradeDate}</td>
+              <td class="ins-mono">${t.date}</td>
               <td><b>${t.insider}</b></td>
               <td style="color:var(--muted); font-size:12px; max-width:150px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${t.title}">${t.title}</td>
               <td class="${t.isSale ? 'ins-sell' : 'ins-buy'}">${t.isSale ? '▼' : '▲'} ${t.typeText}</td>
@@ -626,14 +630,8 @@ async function fetchInsiders() {
       });
     }
 
-    // Nota para las empresas no USA
-    const nonUS = companies.filter(c => c.yahooTicker.includes('.'));
-    if(nonUS.length > 0) {
-      container.innerHTML += `<div class="note-box">ℹ️ <b>Bolsas internacionales:</b> Hay ${nonUS.length} empresas (ej. ${nonUS[0].yahooTicker}) cuyas acciones no cotizan en EE.UU. OpenInsider solo rastrea movimientos reportados a la SEC estadounidense.</div>`;
-    }
-
   } catch(err) {
-    container.innerHTML = `<div class="card" style="border-color:var(--red)"><p style="color:var(--red)">⚠️ Error al conectar con OpenInsider: ${err.message}</p></div>`;
+    container.innerHTML = `<div class="card" style="border-color:var(--red)"><p style="color:var(--red)">⚠️ Error interno al rastrear Insiders: ${err.message}</p></div>`;
     document.getElementById('insiderInfo').textContent = `Error en la búsqueda.`;
   }
   
