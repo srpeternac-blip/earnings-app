@@ -271,7 +271,7 @@ function stopAllTasks() {
   document.getElementById('btnSearch').textContent = '▶ ACTUALIZAR EARNINGS';
   document.getElementById('btnInsiders').disabled = false;
   document.getElementById('btnInsiders').textContent = '▶ ACTUALIZAR INSIDERS';
-  activeRequests = new AbortController(); // Resetear para la próxima vez
+  activeRequests = new AbortController(); 
 }
 
 // --- TEMA OSCURO ---
@@ -288,7 +288,7 @@ if (localStorage.getItem('theme') === 'dark') {
   document.getElementById('btnTheme').textContent = '☀️ Modo Claro';
 }
 
-// --- FUNCIÓN RED ESTRICTA PARA EARNINGS E INSIDERS ---
+// --- FUNCIÓN RED ESTRICTA ---
 async function fetchApiJson(url, signal) {
   const proxiesJson = [
     u => `https://api.allorigins.win/get?url=${encodeURIComponent(u)}`, 
@@ -335,27 +335,11 @@ function getWeekDates(offset=0) {
   });
 }
 
-function fmtES(d) {
-  return d.toLocaleDateString('es-ES', { day: '2-digit', month: 'short' });
-}
-
-function toISO(d) {
-  return d.toISOString().split('T')[0];
-}
-
-function fmtTime() {
-  return new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
-}
-
-function isToday(d) {
-  return d.toDateString() === new Date().toDateString();
-}
-
 const CW = getWeekDates(0);
 const NW = getWeekDates(1);
 
-document.getElementById('subCurrent').textContent = `${fmtES(CW[0])} — ${fmtES(CW[4])}`;
-document.getElementById('subNext').textContent = `${fmtES(NW[0])} — ${fmtES(NW[4])}`;
+document.getElementById('subCurrent').textContent = `${CW[0].toLocaleDateString('es-ES', { day: '2-digit', month: 'short' })} — ${CW[4].toLocaleDateString('es-ES', { day: '2-digit', month: 'short' })}`;
+document.getElementById('subNext').textContent = `${NW[0].toLocaleDateString('es-ES', { day: '2-digit', month: 'short' })} — ${NW[4].toLocaleDateString('es-ES', { day: '2-digit', month: 'short' })}`;
 
 function goTo(page) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
@@ -412,10 +396,10 @@ async function init() {
     sortTable('name'); 
     updateChartFromCompanies();
     
-    // Al usar una API sin CORS para sectores, podemos lanzar todo en paralelo sin bloquear.
-    loadSectors(signal).catch(e => {}); 
+    // Ejecutar tareas sin bloqueos y cargar sectores al final
     fetchEarnings(true, signal)
       .then(() => fetchInsiders(true, signal))
+      .then(() => loadSectors(signal)) 
       .catch(e => {
          if(e.message !== "Cancelado por el usuario") console.error(e);
       });
@@ -427,36 +411,50 @@ async function init() {
   }
 }
 
-// Búsqueda instantánea y directa al buscador público de Yahoo (No requiere proxy)
-async function fetchSectorFast(ticker, signal) {
+// Búsqueda directa a la API de NASDAQ (No bloquea)
+async function fetchSectorNasdaq(ticker, signal) {
   try {
-    const url = `https://query2.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(ticker)}`;
-    const res = await fetch(url, { signal });
-    if (res.ok) {
-      const data = await res.json();
-      if (data.quotes && data.quotes.length > 0) {
-        // Encontramos el ticker exacto o cogemos el primero por defecto
-        const match = data.quotes.find(q => q.symbol === ticker.toUpperCase()) || data.quotes[0];
-        return match.sectorDisp || match.sector || 'Otros';
-      }
+    const cleanTicker = base(ticker).toLowerCase();
+    const url = `https://api.nasdaq.com/api/company/${cleanTicker}/company-profile`;
+    const json = await fetchApiJson(url, signal);
+    
+    if (json?.data?.Sector) {
+      const enSector = json.data.Sector;
+      const sectorMap = {
+          "Technology": "Tecnología",
+          "Health Care": "Salud",
+          "Consumer Discretionary": "Consumo Discrecional",
+          "Finance": "Finanzas",
+          "Industrials": "Industriales",
+          "Real Estate": "Inmobiliario",
+          "Energy": "Energía",
+          "Basic Materials": "Materiales Básicos",
+          "Consumer Staples": "Consumo Defensivo",
+          "Utilities": "Utilities",
+          "Telecommunications": "Comunicación",
+          "Miscellaneous": "Otros"
+      };
+      return sectorMap[enSector] || enSector;
     }
   } catch(e) {}
   return 'Otros';
 }
 
 async function loadSectors(signal) {
-  // Al no depender de proxies lentos, podemos pedir todos los sectores en paralelo al instante
-  await Promise.all(companies.map(async (c) => {
+  // Procesamos de forma asíncrona pero gradual, con una pausa de 400ms para cuidar los proxies
+  for (let i = 0; i < companies.length; i++) {
       if (signal && signal.aborted) return;
-      if (c.sector === 'Cargando...') {
-          c.sector = await fetchSectorFast(c.yahooTicker, signal);
+      
+      if (companies[i].sector === 'Cargando...') {
+          companies[i].sector = await fetchSectorNasdaq(companies[i].yahooTicker, signal);
+          
+          if (i % 2 === 0 || i === companies.length - 1) {
+              renderCarteraTable();
+              updateChartFromCompanies();
+          }
+          await new Promise(r => setTimeout(r, 400));
       }
-  }));
-  
-  if (signal && signal.aborted) return;
-  
-  renderCarteraTable();
-  updateChartFromCompanies();
+  }
 }
 
 function updateChartFromCompanies() {
@@ -500,7 +498,7 @@ function renderCarteraTable() {
     const tickerLink = `<a href="https://es.investing.com/pro/${base(c.yahooTicker)}" target="_blank" class="ticker-link">${c.yahooTicker}</a>`;
     
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td class="td-ticker">${tickerLink}</td><td class="td-name">${c.name}</td><td class="td-sector">${c.sector}</td><td class="td-alerts">${alertsHtml}</td>`;
+    tr.innerHTML = `<td class="td-ticker">${tickerLink}</td><td class="td-name">${c.name}</td><td class="td-sector" style="${c.sector === 'Cargando...' ? 'color:var(--accent); font-style:italic;' : ''}">${c.sector}</td><td class="td-alerts">${alertsHtml}</td>`;
     tbody.appendChild(tr);
   });
 }
@@ -554,7 +552,7 @@ async function fetchEarnings(isBackground = false, signal = activeRequests.signa
   });
 
   const settled = await Promise.allSettled([...CW, ...NW].map(d => {
-    const dISO = toISO(d);
+    const dISO = d.toISOString().split('T')[0];
     return fetchApiJson(`https://api.nasdaq.com/api/calendar/earnings?date=${dISO}`, signal)
       .then(json => (json?.data?.rows || []).flatMap(row => {
         const t = (row.symbol||'').toUpperCase().trim();
@@ -591,10 +589,10 @@ async function fetchEarnings(isBackground = false, signal = activeRequests.signa
   }
 
   const unique = results.filter((r, i, a) => a.findIndex(x => x.ticker === r.ticker) === i).sort((a,b) => a.name.localeCompare(b.name));
-  const curr = unique.filter(r => CW.some(d => toISO(d) === r.date));
-  const next = unique.filter(r => NW.some(d => toISO(d) === r.date));
+  const curr = unique.filter(r => CW.some(d => d.toISOString().split('T')[0] === r.date));
+  const next = unique.filter(r => NW.some(d => d.toISOString().split('T')[0] === r.date));
 
-  // Actualizar Alertas (Solo semana actual)
+  // Actualizar Alertas
   earningsAlerts = new Set(curr.map(r => r.ticker));
   renderCarteraTable();
 
@@ -615,14 +613,17 @@ function renderWeek(which, items, weekDates) {
   
   let html = '';
   weekDates.forEach((date, i) => {
-    const key = toISO(date), di = byDate[key] || [], today = isToday(date);
+    const key = date.toISOString().split('T')[0];
+    const di = byDate[key] || [];
+    const isDayToday = date.toDateString() === new Date().toDateString();
+    
     let compsHtml = '<span class="day-empty">—</span>';
     if(di.length > 0) {
       compsHtml = di.map(it => `
         <div class="earn-chip"><div class="earn-chip-top"><span class="earn-ticker">${it.ticker}</span><span class="earn-time ${it.timeClass}">${it.timeLabel}</span></div><span class="earn-name">${it.name}</span></div>
       `).join('');
     }
-    html += `<div class="day-block"><div class="day-row"><div class="day-name-col ${today ? 'today-col' : ''}"><div class="day-name-txt">${DAYS_ES[i]} ${today ? '<span class="today-dot">HOY</span>' : ''}</div><div class="day-date-txt">${fmtES(date)}</div></div><div class="day-companies">${compsHtml}</div></div></div>`;
+    html += `<div class="day-block"><div class="day-row"><div class="day-name-col ${isDayToday ? 'today-col' : ''}"><div class="day-name-txt">${DAYS_ES[i]} ${isDayToday ? '<span class="today-dot">HOY</span>' : ''}</div><div class="day-date-txt">${date.toLocaleDateString('es-ES', { day: '2-digit', month: 'short' })}</div></div><div class="day-companies">${compsHtml}</div></div></div>`;
   });
   bodyEl.innerHTML = html;
 }
