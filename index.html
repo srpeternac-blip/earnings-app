@@ -96,10 +96,14 @@
   .company-table th:hover { color: var(--text); }
   .company-table td { padding: 12px 16px; font-size: 13px; border-bottom: 1px solid var(--border); vertical-align: middle; }
   .company-table tr:last-child td { border-bottom: none; }
-  .td-ticker { font-weight: 600; color: var(--accent); width: 15%; }
+  .td-ticker { font-weight: 600; width: 15%; }
   .td-name { color: var(--text); font-weight: 500; width: 35%; }
   .td-sector { color: var(--muted); width: 25%; font-size: 12px; }
   .td-alerts { width: 25%; text-align: right; }
+
+  /* Enlace Ticker */
+  .ticker-link { color: var(--accent); text-decoration: none; border-bottom: 1px dashed var(--accent); transition: opacity 0.2s; }
+  .ticker-link:hover { opacity: 0.7; }
 
   /* Alertas Badges */
   .alert-badge { display: inline-flex; align-items: center; justify-content: center; padding: 4px 10px; border-radius: 6px; font-size: 10px; font-weight: 700; text-transform: uppercase; cursor: pointer; margin-left: 6px; transition: opacity .2s; letter-spacing: 0.5px;}
@@ -234,7 +238,7 @@
       <div class="page-header"><h2>Movimientos de Insiders</h2></div>
       <div class="search-bar-row">
         <button class="btn btn-primary" id="btnInsiders" onclick="fetchInsiders(false)">▶ ACTUALIZAR INSIDERS</button>
-        <span class="search-info" id="insiderInfo">Sincronizado automáticamente al inicio (Últimos 3 días).</span>
+        <span class="search-info" id="insiderInfo">Sincronizado automáticamente al inicio (Última semana).</span>
       </div>
       <div id="insidersContainer"></div>
     </div>
@@ -354,10 +358,13 @@ async function init() {
     
     sortTable('name'); 
     
-    // Disparar las tareas de fondo automáticas
-    loadSectors();
-    fetchEarnings(true); 
-    fetchInsiders(true);
+    // Disparar las tareas de fondo de forma SECUENCIAL para evitar saturar la red y los proxies
+    fetchEarnings(true).then(() => {
+      return fetchInsiders(true);
+    }).then(() => {
+      // Pausamos antes de lanzar los sectores
+      setTimeout(loadSectors, 2000);
+    });
 
   } catch(e) {
     el.className = 'status-pill err'; el.textContent = `⚠️ Error: ${e.message}`;
@@ -393,8 +400,10 @@ function renderCarteraTable() {
     if(earningsAlerts.has(c.yahooTicker)) alertsHtml += `<span class="alert-badge alert-earn" onclick="goTo('resultados')">Resultados</span>`;
     if(insiderAlerts.has(c.yahooTicker)) alertsHtml += `<span class="alert-badge alert-ins" onclick="goTo('insiders')">Insiders</span>`;
     
+    const tickerLink = `<a href="https://es.investing.com/pro/${base(c.yahooTicker)}" target="_blank" class="ticker-link">${c.yahooTicker}</a>`;
+    
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td class="td-ticker">${c.yahooTicker}</td><td class="td-name">${c.name}</td><td class="td-sector">${c.sector}</td><td class="td-alerts">${alertsHtml}</td>`;
+    tr.innerHTML = `<td class="td-ticker">${tickerLink}</td><td class="td-name">${c.name}</td><td class="td-sector">${c.sector}</td><td class="td-alerts">${alertsHtml}</td>`;
     tbody.appendChild(tr);
   });
 }
@@ -412,15 +421,19 @@ async function loadSectors() {
   document.getElementById('chartCard').style.display = 'flex';
   const sectorsCount = {};
   
-  for(let i = 0; i < companies.length; i += 5) {
-    const batch = companies.slice(i, i + 5);
+  // Procesamiento por lotes pequeños (3 empresas a la vez) con pausa mayor para cuidar los proxies
+  for(let i = 0; i < companies.length; i += 3) {
+    const batch = companies.slice(i, i + 3);
     await Promise.all(batch.map(async c => {
-      c.sector = await fetchSectorSafe(c.yahooTicker);
+      if(c.sector === 'Cargando...') {
+        c.sector = await fetchSectorSafe(c.yahooTicker);
+      }
       sectorsCount[c.sector] = (sectorsCount[c.sector] || 0) + 1;
     }));
+    
     renderCarteraTable();
     updateChart(sectorsCount);
-    await new Promise(r => setTimeout(r, 600)); // Pausa para no saturar los proxies
+    await new Promise(r => setTimeout(r, 1500)); // Pausa de 1.5s entre lotes
   }
 }
 
@@ -540,7 +553,7 @@ async function fetchInsiders(isBackground = false) {
   try {
     const tradesByTicker = {};
     let totalTrades = 0;
-    const maxDaysAgo = 3; // Reducido a 3 días para quitar repeticiones
+    const maxDaysAgo = 7; // Ampliado a 7 días (1 semana)
     const nowMs = Date.now();
 
     await Promise.allSettled(usTickers.map(async (comp) => {
@@ -564,7 +577,7 @@ async function fetchInsiders(isBackground = false) {
           const price = parseFloat((row.lastPrice || '0').replace(/,/g, ''));
           const totalValueNum = (shares * price) || 0;
           
-          if (totalValueNum < 10000) return; // Filtro de ruido: Ignorar operaciones de menos de 10.000$
+          if (totalValueNum < 10000) return; // Filtro de ruido
 
           let relevance = 'Media';
           let relColor = 'var(--bmo)';
@@ -579,7 +592,7 @@ async function fetchInsiders(isBackground = false) {
         });
 
         if (validTxs.length > 0) {
-          tradesByTicker[comp.yahooTicker] = validTxs.sort((a,b) => b.valueNum - a.valueNum); // Ordenar por volumen
+          tradesByTicker[comp.yahooTicker] = validTxs.sort((a,b) => b.valueNum - a.valueNum);
           totalTrades += validTxs.length;
         }
       } catch(e) {} 
@@ -592,7 +605,7 @@ async function fetchInsiders(isBackground = false) {
     renderCarteraTable();
 
     if(activeTickers.length === 0) {
-      container.innerHTML = `<div class="card"><p style="color:var(--muted)">No se han registrado operaciones significativas (>${10000}$) en los últimos 3 días.</p></div>`;
+      container.innerHTML = `<div class="card"><p style="color:var(--muted)">No se han registrado operaciones significativas (>${10000}$) en los últimos 7 días.</p></div>`;
     } else {
       let globalHtml = '';
       activeTickers.forEach(ticker => {
@@ -620,7 +633,7 @@ async function fetchInsiders(isBackground = false) {
       });
       container.innerHTML = globalHtml;
     }
-    document.getElementById('insiderInfo').textContent = `✓ Actualizado: ${totalTrades} operaciones significativas (Últimos 3 días).`;
+    document.getElementById('insiderInfo').textContent = `✓ Actualizado: ${totalTrades} operaciones significativas (Última semana).`;
 
   } catch(err) {
     if(!isBackground) container.innerHTML = `<div class="card"><p style="color:var(--red)">⚠️ Error interno: ${err.message}</p></div>`;
