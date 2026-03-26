@@ -57,7 +57,7 @@
   .theme-toggle:hover { filter: brightness(0.95); }
   
   /* Main Area */
-  .main { margin-left: 240px; flex: 1; padding: 40px; max-width: 1050px; } /* Restaurado el ancho compacto */
+  .main { margin-left: 240px; flex: 1; padding: 40px; max-width: 1050px; }
   .page { display: none; }
   .page.active { display: block; animation: fadeUp .3s ease both; }
   @keyframes fadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
@@ -68,7 +68,7 @@
   /* Layout Cartera (Master-Detail) */
   .cartera-layout { display: flex; gap: 24px; align-items: flex-start; }
   .cartera-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 20px; }
-  .cartera-detail { width: 340px; flex-shrink: 0; display: none; flex-direction: column; gap: 20px; position: sticky; top: 40px; }
+  .cartera-detail { width: 340px; flex-shrink: 0; display: none; flex-direction: column; gap: 20px; }
 
   /* Cards & Generales */
   .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 24px; box-shadow: var(--shadow); transition: background 0.3s, border 0.3s; }
@@ -118,8 +118,8 @@
   .ticker-link { color: var(--accent); text-decoration: none; border-bottom: 1px dashed var(--accent); transition: opacity 0.2s; cursor: pointer; }
   .ticker-link:hover { opacity: 0.7; }
 
-  /* Alertas Badges */
-  .alert-badge { display: inline-flex; align-items: center; justify-content: center; padding: 4px 10px; border-radius: 6px; font-size: 10px; font-weight: 700; text-transform: uppercase; cursor: pointer; margin-left: 6px; transition: opacity .2s; letter-spacing: 0.5px;}
+  /* Alertas Badges Rediseñadas */
+  .alert-badge { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 4px; font-size: 12px; font-weight: 700; text-transform: uppercase; cursor: pointer; margin-left: 6px; transition: opacity .2s; }
   .alert-badge:hover { opacity: 0.8; }
   .alert-earn { background: var(--bmo); color: #fff; }
   .alert-ins { background: var(--amc); color: #fff; }
@@ -530,6 +530,7 @@ async function fetchSectorWikipedia(name, ticker) {
     const text = ((pages[pageId].extract || '') + ' ' + snippet).toLowerCase();
     
     const t = text;
+    // Crypto mapped to Tecnología
     if (t.match(/crypto|bitcoin|blockchain|technolog|software|computer|cyber|cloud|semiconductor|electronic|internet|saas|ai |artificial intelligence|data /)) return 'Tecnología';
     if (t.match(/health|pharm|bio|medic|clinic|therap|oncolog/)) return 'Salud';
     if (t.match(/bank|financ|invest|insur|payment|asset management|capital|equity/)) return 'Finanzas';
@@ -542,7 +543,7 @@ async function fetchSectorWikipedia(name, ticker) {
     if (t.match(/utility|electric|water|power/)) return 'Utilities';
     if (t.match(/telecom|communicat|media|broadcast|wireless/)) return 'Comunicación';
 
-    return 'Finanzas'; 
+    return 'Finanzas'; // Fallback oficial
   } catch (e) {
     return 'Finanzas';
   }
@@ -624,10 +625,13 @@ function renderCarteraTable() {
   
   companiesToRender.forEach(c => {
     let alertsHtml = '';
-    if(earningsAlerts.has(c.yahooTicker)) alertsHtml += `<span class="alert-badge alert-earn">Earning Semanal</span>`;
-    if(insiderAlerts.has(c.yahooTicker)) alertsHtml += `<span class="alert-badge alert-ins">Insider Semanal</span>`;
+    const hasAlert = earningsAlerts.has(c.yahooTicker) || insiderAlerts.has(c.yahooTicker);
+    const redDot = hasAlert ? `<span style="display:inline-block;width:6px;height:6px;background:var(--red);border-radius:50%;margin-right:6px;vertical-align:middle;"></span>` : '';
     
-    const tickerLink = `<a onclick="abrirEmpresa('${c.yahooTicker}')" class="ticker-link">${c.yahooTicker}</a>`;
+    if(earningsAlerts.has(c.yahooTicker)) alertsHtml += `<span class="alert-badge alert-earn" onclick="event.stopPropagation(); goTo('resultados')" title="Earnings esta semana">E</span>`;
+    if(insiderAlerts.has(c.yahooTicker)) alertsHtml += `<span class="alert-badge alert-ins" onclick="event.stopPropagation(); goTo('insiders')" title="Insiders esta semana">I</span>`;
+    
+    const tickerLink = `<a onclick="abrirEmpresa('${c.yahooTicker}')" class="ticker-link">${redDot}${c.yahooTicker}</a>`;
     
     const sectorsOptions = SECTORS_LIST.map(s => `<option value="${s}" ${c.sector === s ? 'selected' : ''}>${s}</option>`).join('');
     const sectorSelect = `
@@ -648,7 +652,7 @@ function toggleWeek(w) {
   document.getElementById('body'+w).classList.toggle('open');
 }
 
-// --- EARNINGS (Restaurado a la API de NASDAQ por seguridad y fiabilidad) ---
+// --- EARNINGS ---
 async function fetchEarnings(isBackground = false) {
   if(!companies.length) return;
   const btn = document.getElementById('btnSearch');
@@ -697,7 +701,7 @@ async function fetchEarnings(isBackground = false) {
 
   const unique = results.filter((r, i, a) => a.findIndex(x => x.ticker === r.ticker) === i).sort((a,b) => a.name.localeCompare(b.name));
   
-  // Guardamos la información extraída a nivel global para que el detalle de la empresa pueda acceder a ella instantáneamente
+  // Guardamos la información extraída a nivel global
   window.globalEarningsData = unique;
 
   const curr = unique.filter(r => CW.some(d => toISO(d) === r.date));
@@ -851,7 +855,7 @@ function abrirEmpresa(ticker) {
     document.getElementById('detTicker').textContent = comp.yahooTicker;
     document.getElementById('btnInvesting').href = `https://es.investing.com/pro/${base(comp.yahooTicker)}`;
 
-    document.getElementById('detEarnings').innerHTML = '⏳ Buscando fecha...';
+    document.getElementById('detEarnings').innerHTML = '⏳ Buscando fecha confirmada...';
     document.getElementById('detInsiders').innerHTML = '⏳ Analizando últimos registros...';
     document.getElementById('detNews').innerHTML = '⏳ Rastreando titulares (Traduciendo al español)...';
 
@@ -864,10 +868,20 @@ function cerrarEmpresa() {
     document.getElementById('detailsPanel').style.display = 'none';
 }
 
-function fetchEmpresaEarnings(ticker) {
-    // Almacenamos la consulta a la base de datos NASDAQ extraida de forma local. Cero fallos.
-    const found = window.globalEarningsData?.find(r => r.ticker === ticker);
+async function fetchEmpresaEarnings(ticker) {
+    try {
+        const url = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(base(ticker))}?modules=calendarEvents`;
+        const data = await fetchApiJson(url);
+        const events = data?.quoteSummary?.result?.[0]?.calendarEvents?.earnings;
+        if(events && events.earningsDate && events.earningsDate.length > 0) {
+            const dateTs = events.earningsDate[0].raw * 1000;
+            const d = new Date(dateTs);
+            document.getElementById('detEarnings').innerHTML = `<div style="font-size:18px; font-weight:700; color:var(--accent)">${fmtES(d)} de ${d.getFullYear()}</div><div style="font-size:12px; color:var(--muted); margin-top:4px;">Confirmado por BBDD</div>`;
+            return;
+        }
+    } catch(e) {}
     
+    const found = window.globalEarningsData?.find(r => r.ticker === ticker);
     if (found) {
         const d = new Date(found.date);
         document.getElementById('detEarnings').innerHTML = `<div style="font-size:18px; font-weight:700; color:var(--accent)">${fmtES(d)} de ${d.getFullYear()}</div><div style="font-size:12px; color:var(--muted); margin-top:4px;">${found.timeLabel}</div>`;
