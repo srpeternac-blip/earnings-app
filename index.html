@@ -288,7 +288,7 @@ if (localStorage.getItem('theme') === 'dark') {
   document.getElementById('btnTheme').textContent = '☀️ Modo Claro';
 }
 
-// --- FUNCIÓN RED ESTRICTA ---
+// --- FUNCIÓN RED ESTRICTA PARA EARNINGS E INSIDERS ---
 async function fetchApiJson(url, signal) {
   const proxiesJson = [
     u => `https://api.allorigins.win/get?url=${encodeURIComponent(u)}`, 
@@ -333,6 +333,10 @@ function getWeekDates(offset=0) {
     d.setDate(mon.getDate() + i); 
     return d; 
   });
+}
+
+function fmtES(d) {
+  return d.toLocaleDateString('es-ES', { day: '2-digit', month: 'short' });
 }
 
 const CW = getWeekDates(0);
@@ -396,13 +400,15 @@ async function init() {
     sortTable('name'); 
     updateChartFromCompanies();
     
-    // Ejecutar tareas sin bloqueos y cargar sectores al final
+    // Lanzar tareas sin bloquear
     fetchEarnings(true, signal)
       .then(() => fetchInsiders(true, signal))
-      .then(() => loadSectors(signal)) 
       .catch(e => {
          if(e.message !== "Cancelado por el usuario") console.error(e);
       });
+
+    // Cargar sectores vía Wikipedia API instantáneamente (sin proxies)
+    loadSectorsWikipedia(signal).catch(e => {});
 
   } catch(e) {
     if(e.name !== 'AbortError') {
@@ -411,50 +417,61 @@ async function init() {
   }
 }
 
-// Búsqueda directa a la API de NASDAQ (No bloquea)
-async function fetchSectorNasdaq(ticker, signal) {
+// --- SECTORES VÍA WIKIPEDIA API DIRECTA (0 CORS, 0 PROXIES) ---
+async function fetchSectorWikipedia(name, ticker, signal) {
   try {
-    const cleanTicker = base(ticker).toLowerCase();
-    const url = `https://api.nasdaq.com/api/company/${cleanTicker}/company-profile`;
-    const json = await fetchApiJson(url, signal);
+    const cleanName = name.replace(/(Inc\.|Corp\.|Ltd\.|Company|Holdings|Group)/gi, '').trim();
     
-    if (json?.data?.Sector) {
-      const enSector = json.data.Sector;
-      const sectorMap = {
-          "Technology": "Tecnología",
-          "Health Care": "Salud",
-          "Consumer Discretionary": "Consumo Discrecional",
-          "Finance": "Finanzas",
-          "Industrials": "Industriales",
-          "Real Estate": "Inmobiliario",
-          "Energy": "Energía",
-          "Basic Materials": "Materiales Básicos",
-          "Consumer Staples": "Consumo Defensivo",
-          "Utilities": "Utilities",
-          "Telecommunications": "Comunicación",
-          "Miscellaneous": "Otros"
-      };
-      return sectorMap[enSector] || enSector;
-    }
-  } catch(e) {}
-  return 'Otros';
+    // Búsqueda directa en Wikipedia (API nativa que no bloquea CORS)
+    const searchUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(cleanName + ' ' + ticker)}&utf8=&format=json&origin=*`;
+    const searchRes = await fetch(searchUrl, { signal });
+    const searchData = await searchRes.json();
+    
+    if (!searchData.query.search.length) return 'Otros';
+    
+    const title = searchData.query.search[0].title;
+    
+    const extractUrl = `https://en.wikipedia.org/w/api.php?action=query&prop=extracts&exintro&explaintext&redirects=1&titles=${encodeURIComponent(title)}&format=json&origin=*`;
+    const extractRes = await fetch(extractUrl, { signal });
+    const extractData = await extractRes.json();
+    
+    const pages = extractData.query.pages;
+    const pageId = Object.keys(pages)[0];
+    const text = (pages[pageId].extract || '').toLowerCase();
+    
+    // Algoritmo de mapeo de palabras clave al sector en español
+    if (text.match(/technology|software|computer|cybersecurity|cloud|semiconductor|electronics|internet/)) return 'Tecnología';
+    if (text.match(/health|pharmaceutical|biotechnology|medical|clinical/)) return 'Salud';
+    if (text.match(/bank|finance|financial|investment|insurance|payment/)) return 'Finanzas';
+    if (text.match(/retail|consumer|apparel|restaurant|entertainment|e-commerce/)) return 'Consumo Discrecional';
+    if (text.match(/energy|oil|gas|petroleum|solar|wind/)) return 'Energía';
+    if (text.match(/industrial|manufacturing|machinery|aerospace|defense/)) return 'Industriales';
+    if (text.match(/real estate|reit|property/)) return 'Inmobiliario';
+    if (text.match(/materials|mining|chemical|steel|gold/)) return 'Materiales Básicos';
+    if (text.match(/food|beverage|grocery|household/)) return 'Consumo Defensivo';
+    if (text.match(/utility|electric|water|power/)) return 'Utilities';
+    if (text.match(/telecom|communication|media|broadcasting/)) return 'Comunicación';
+    if (text.match(/crypto|bitcoin|blockchain/)) return 'Cripto/Blockchain';
+
+    return 'Otros';
+  } catch (e) {
+    return 'Otros';
+  }
 }
 
-async function loadSectors(signal) {
-  // Procesamos de forma asíncrona pero gradual, con una pausa de 400ms para cuidar los proxies
-  for (let i = 0; i < companies.length; i++) {
+async function loadSectorsWikipedia(signal) {
+  // Al no usar proxies, podemos disparar todas las peticiones a la vez (Wikipedia lo soporta perfectamente)
+  await Promise.all(companies.map(async (c) => {
       if (signal && signal.aborted) return;
-      
-      if (companies[i].sector === 'Cargando...') {
-          companies[i].sector = await fetchSectorNasdaq(companies[i].yahooTicker, signal);
-          
-          if (i % 2 === 0 || i === companies.length - 1) {
-              renderCarteraTable();
-              updateChartFromCompanies();
-          }
-          await new Promise(r => setTimeout(r, 400));
+      if (c.sector === 'Cargando...') {
+          c.sector = await fetchSectorWikipedia(c.name, base(c.yahooTicker), signal);
       }
-  }
+  }));
+  
+  if (signal && signal.aborted) return;
+  
+  renderCarteraTable();
+  updateChartFromCompanies();
 }
 
 function updateChartFromCompanies() {
@@ -498,7 +515,7 @@ function renderCarteraTable() {
     const tickerLink = `<a href="https://es.investing.com/pro/${base(c.yahooTicker)}" target="_blank" class="ticker-link">${c.yahooTicker}</a>`;
     
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td class="td-ticker">${tickerLink}</td><td class="td-name">${c.name}</td><td class="td-sector" style="${c.sector === 'Cargando...' ? 'color:var(--accent); font-style:italic;' : ''}">${c.sector}</td><td class="td-alerts">${alertsHtml}</td>`;
+    tr.innerHTML = `<td class="td-ticker">${tickerLink}</td><td class="td-name">${c.name}</td><td class="td-sector">${c.sector}</td><td class="td-alerts">${alertsHtml}</td>`;
     tbody.appendChild(tr);
   });
 }
@@ -615,6 +632,8 @@ function renderWeek(which, items, weekDates) {
   weekDates.forEach((date, i) => {
     const key = date.toISOString().split('T')[0];
     const di = byDate[key] || [];
+    
+    // Comprobación segura inlined en vez de llamar a isToday
     const isDayToday = date.toDateString() === new Date().toDateString();
     
     let compsHtml = '<span class="day-empty">—</span>';
@@ -641,7 +660,7 @@ async function fetchInsiders(isBackground = false, signal = activeRequests.signa
   try {
     const tradesByTicker = {};
     let totalTrades = 0;
-    const maxDaysAgo = 7; // 1 semana
+    const maxDaysAgo = 7; 
     const nowMs = Date.now();
 
     await Promise.allSettled(usTickers.map(async (comp) => {
@@ -665,6 +684,8 @@ async function fetchInsiders(isBackground = false, signal = activeRequests.signa
           const price = parseFloat((row.lastPrice || '0').replace(/,/g, ''));
           const totalValueNum = (shares * price) || 0;
           
+          if (totalValueNum < 1000) return; 
+
           let relevance = 'Media';
           let relColor = 'var(--bmo)';
           if (totalValueNum >= 100000) { relevance = 'Considerable'; relColor = 'var(--accent)'; }
