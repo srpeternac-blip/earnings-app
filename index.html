@@ -444,6 +444,12 @@ function parseCSVLine(line) {
   cols.push(cur.trim()); return cols;
 }
 
+const SECTORS_LIST = [
+  'Tecnología', 'Salud', 'Finanzas', 'Consumo Discrecional', 'Comunicación', 
+  'Industriales', 'Consumo Defensivo', 'Energía', 'Utilities', 'Inmobiliario', 
+  'Materiales Básicos'
+];
+
 async function init() {
   activeRequests.abort();
   activeRequests = new AbortController();
@@ -498,6 +504,19 @@ async function init() {
     if(e.name !== 'AbortError') el.textContent = `⚠️ Error`;
   }
 }
+
+// --- SECTORES MANUALES (DESPLEGABLE) ---
+window.guardarSectorIndividual = function(ticker, value) {
+    if(!value || value === 'Cargando...') return;
+    const comp = companies.find(c => c.yahooTicker === ticker);
+    if(comp) comp.sector = value;
+    
+    const saved = JSON.parse(localStorage.getItem('manualSectors') || '{}');
+    saved[ticker] = value;
+    localStorage.setItem('manualSectors', JSON.stringify(saved));
+    
+    renderSectorsBarChart();
+};
 
 // --- FILTRAR POR SECTOR ---
 window.filtrarPorSector = function(sector) {
@@ -637,15 +656,21 @@ function renderCarteraTable() {
   
   companiesToRender.forEach(c => {
     let alertsHtml = '';
-    // Letras simples "E" y "I" sin enlaces
     if(earningsAlerts.has(c.yahooTicker)) alertsHtml += `<span class="alert-badge alert-earn" title="Earnings esta semana">E</span>`;
     if(insiderAlerts.has(c.yahooTicker)) alertsHtml += `<span class="alert-badge alert-ins" title="Insiders esta semana">I</span>`;
     
-    // Ticker y alertas juntos
     const tickerLink = `<div style="display:flex; align-items:center;"><a onclick="abrirEmpresa('${c.yahooTicker}')" class="ticker-link">${c.yahooTicker}</a>${alertsHtml}</div>`;
     
+    const sectorsOptions = SECTORS_LIST.map(s => `<option value="${s}" ${c.sector === s ? 'selected' : ''}>${s}</option>`).join('');
+    const sectorSelect = `
+      <select class="sector-select" data-ticker="${c.yahooTicker}" onchange="guardarSectorIndividual('${c.yahooTicker}', this.value)">
+        ${c.sector !== 'Cargando...' && !SECTORS_LIST.includes(c.sector) ? `<option value="${c.sector}" selected>${c.sector}</option>` : ''}
+        ${sectorsOptions}
+        ${c.sector === 'Cargando...' ? `<option value="Cargando..." selected disabled>Cargando...</option>` : ''}
+      </select>`;
+
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${tickerLink}</td><td class="td-name">${c.name}</td><td class="td-sector" style="color:var(--muted); font-size:12px;">${c.sector}</td>`;
+    tr.innerHTML = `<td>${tickerLink}</td><td class="td-name">${c.name}</td><td class="td-sector">${sectorSelect}</td>`;
     tbody.appendChild(tr);
   });
 }
@@ -655,7 +680,7 @@ function toggleWeek(w) {
   document.getElementById('body'+w).classList.toggle('open');
 }
 
-// --- EARNINGS (NASDAQ) ---
+// --- EARNINGS (NASDAQ GLOBAL PARA TABLA) ---
 async function fetchEarnings(isBackground = false, signal = activeRequests.signal) {
   if(!companies.length) return;
   const btn = document.getElementById('btnSearch');
@@ -744,7 +769,7 @@ function renderWeek(which, items, weekDates) {
   bodyEl.innerHTML = html;
 }
 
-// --- INSIDERS (Máximo últimos 7 días) ---
+// --- INSIDERS (NASDAQ GLOBAL PARA TABLA) ---
 async function fetchInsiders(isBackground = false, signal = activeRequests.signal) {
   if(!companies.length) return;
   const btn = document.getElementById('btnInsiders');
@@ -770,13 +795,12 @@ async function fetchInsiders(isBackground = false, signal = activeRequests.signa
         rows.forEach(row => {
           if(!row.lastDate || !row.transactionType) return;
           
-          // Fix fecha: NASDAQ devuelve MM/DD/YYYY
           const dateParts = row.lastDate.split('/');
           if(dateParts.length !== 3) return;
-          const rowDate = new Date(`${dateParts[2]}-${dateParts[0]}-${dateParts[1]}`); // YYYY-MM-DD
+          const rowDate = new Date(`${dateParts[2]}-${dateParts[0]}-${dateParts[1]}`); 
           
           const diffDays = (nowMs - rowDate.getTime()) / (1000 * 3600 * 24);
-          if (diffDays > maxDaysAgo || diffDays < 0) return; // Filtro estricto 7 días
+          if (diffDays > maxDaysAgo || diffDays < 0) return;
 
           const type = row.transactionType.toLowerCase();
           const isSale = type.includes('sell') || type.includes('sale');
@@ -796,7 +820,6 @@ async function fetchInsiders(isBackground = false, signal = activeRequests.signa
           if (totalValueNum >= 100000) { relevance = 'Considerable'; relColor = 'var(--accent)'; }
           else if (totalValueNum < 10000) { relevance = 'Ridícula'; relColor = 'var(--muted)'; }
 
-          // Formatear a europeo DD/MM/YYYY
           const formattedDate = `${dateParts[1].padStart(2, '0')}/${dateParts[0].padStart(2, '0')}/${dateParts[2]}`;
 
           validTxs.push({
@@ -877,59 +900,79 @@ function abrirEmpresa(ticker) {
     document.getElementById('detEarningsLast').innerHTML = '⏳ Consultando historial...';
     document.getElementById('detInsiders').innerHTML = '⏳ Analizando últimos registros...';
     
-    // Resetear noticias al estado inicial 'Todas' de forma segura
+    // Carga de noticias por defecto
     loadNewsTab('Todas');
 
     fetchEmpresaEarnings(comp.yahooTicker);
     fetchEmpresaInsiders(comp.yahooTicker);
 }
 
-// Extrae de NASDAQ directamente la próxima fecha (analyst/earnings-date) y los históricos (company/earnings-surprise)
+// API de NASDAQ específica para detalles de empresa
 async function fetchEmpresaEarnings(ticker, force = false) {
     if(force) {
         document.getElementById('detEarningsNext').innerHTML = '⏳ Actualizando...';
         document.getElementById('detEarningsLast').innerHTML = '⏳ Actualizando...';
     }
     try {
-        // 1. PRÓXIMOS RESULTADOS (Desde NASDAQ analyst endpoint)
-        let nextDateHtml = `<span style="color:var(--muted)">Fecha no confirmada</span>`;
-        try {
-            const dateUrl = `https://api.nasdaq.com/api/analyst/${base(ticker).toLowerCase()}/earnings-date`;
-            const dateData = await fetchApiJson(dateUrl);
-            const annDate = dateData?.data?.announcementDate;
-            if(annDate) {
-                nextDateHtml = `<div style="font-size:18px; font-weight:700; color:var(--accent)">${annDate}</div><div style="font-size:12px; color:var(--muted); margin-top:4px;">Estimación Oficial</div>`;
+        const cleanTicker = base(ticker).toLowerCase();
+        const isInternational = ticker.includes('.');
+
+        // 1. PRÓXIMOS RESULTADOS
+        let nextDateHtml = '';
+        if(isInternational) {
+            nextDateHtml = `<span style="color:var(--muted)">Datos de NASDAQ no disponibles para este ticker internacional</span>`;
+        } else {
+            try {
+                const dateUrl = `https://api.nasdaq.com/api/analyst/${cleanTicker}/earnings-date`;
+                const dateData = await fetchApiJson(dateUrl);
+                const annDate = dateData?.data?.announcementDate;
+                if(annDate) {
+                    nextDateHtml = `<div style="font-size:18px; font-weight:700; color:var(--accent)">${annDate}</div><div style="font-size:12px; color:var(--muted); margin-top:4px;">Estimación Oficial de NASDAQ</div>`;
+                } else {
+                    nextDateHtml = `<span style="color:var(--muted)">Fecha no confirmada aún en NASDAQ</span>`;
+                }
+            } catch(e) {
+                nextDateHtml = `<span style="color:var(--muted)">Fecha no confirmada aún en NASDAQ</span>`;
             }
-        } catch(e) {}
-        
+        }
         document.getElementById('detEarningsNext').innerHTML = nextDateHtml;
 
-        // 2. ÚLTIMOS RESULTADOS (Desde NASDAQ earnings-surprise)
-        let lastDateHtml = `<span style="color:var(--muted)">Datos históricos no disponibles</span>`;
-        try {
-            const surpUrl = `https://api.nasdaq.com/api/company/${base(ticker).toLowerCase()}/earnings-surprise`;
-            const surpData = await fetchApiJson(surpUrl);
-            const rows = surpData?.data?.earningsSurpriseTable?.rows;
-            
-            if(rows && rows.length > 0) {
-                const lastE = rows[0]; // La primera es la más reciente reportada
-                const d = lastE.dateReported;
-                const actual = lastE.epsActual;
-                const est = lastE.epsConsensusEstimate;
-                const surp = parseFloat(lastE.percentageSurprise); 
+        // 2. ÚLTIMOS RESULTADOS
+        let lastDateHtml = '';
+        if(isInternational) {
+            lastDateHtml = `<span style="color:var(--muted)">Datos históricos de NASDAQ no disponibles</span>`;
+        } else {
+            try {
+                const surpUrl = `https://api.nasdaq.com/api/company/${cleanTicker}/earnings-surprise`;
+                const surpData = await fetchApiJson(surpUrl);
+                const rows = surpData?.data?.earningsSurpriseTable?.rows;
+                
+                if(rows && rows.length > 0) {
+                    const lastE = rows[0]; 
+                    const d = lastE.dateReported;
+                    const actualRaw = lastE.epsActual;
+                    const estRaw = lastE.epsConsensusEstimate;
+                    const surp = parseFloat(lastE.percentageSurprise); 
+                    
+                    const actual = actualRaw !== undefined && actualRaw !== null ? actualRaw : '—';
+                    const est = estRaw !== undefined && estRaw !== null ? estRaw : '—';
 
-                let badge = '';
-                if(surp > 0) badge = '<span style="background:rgba(22, 163, 74, 0.15); color:var(--green); padding:2px 6px; border-radius:4px; font-size:10px; font-weight:700;">SUPERÓ</span>';
-                else if(surp < 0) badge = '<span style="background:rgba(220, 38, 38, 0.15); color:var(--red); padding:2px 6px; border-radius:4px; font-size:10px; font-weight:700;">NO SUPERÓ</span>';
-                else badge = '<span style="background:var(--surface2); color:var(--muted); border:1px solid var(--border); padding:2px 6px; border-radius:4px; font-size:10px; font-weight:700;">EN LÍNEA</span>';
+                    let badge = '';
+                    if(surp > 0) badge = '<span style="background:rgba(22, 163, 74, 0.15); color:var(--green); padding:2px 6px; border-radius:4px; font-size:10px; font-weight:700;">SUPERÓ</span>';
+                    else if(surp < 0) badge = '<span style="background:rgba(220, 38, 38, 0.15); color:var(--red); padding:2px 6px; border-radius:4px; font-size:10px; font-weight:700;">NO SUPERÓ</span>';
+                    else if(surp === 0) badge = '<span style="background:var(--surface2); color:var(--muted); border:1px solid var(--border); padding:2px 6px; border-radius:4px; font-size:10px; font-weight:700;">EN LÍNEA</span>';
 
-                lastDateHtml = `
-                    <div style="font-size:14px; font-weight:600; margin-bottom:4px; display:flex; align-items:center; gap:8px;">${d} ${badge}</div>
-                    <div style="font-size:12px; color:var(--muted);">EPS Real: <b style="color:var(--text)">${actual}</b> | Estimado: ${est}</div>
-                `;
+                    lastDateHtml = `
+                        <div style="font-size:14px; font-weight:600; margin-bottom:4px; display:flex; align-items:center; gap:8px;">${d} ${badge}</div>
+                        <div style="font-size:12px; color:var(--muted);">EPS Real: <b style="color:var(--text)">${actual}</b> | Estimado: ${est}</div>
+                    `;
+                } else {
+                    lastDateHtml = `<span style="color:var(--muted)">Datos históricos no disponibles</span>`;
+                }
+            } catch(e) {
+                lastDateHtml = `<span style="color:var(--muted)">Datos históricos no disponibles</span>`;
             }
-        } catch(e) {}
-
+        }
         document.getElementById('detEarningsLast').innerHTML = lastDateHtml;
 
     } catch(e) {
@@ -954,13 +997,12 @@ async function fetchEmpresaInsiders(ticker, force = false) {
         for(const row of rows) {
             if(!row.lastDate || !row.transactionType) continue;
             
-            // Parse MM/DD/YYYY
             const dateParts = row.lastDate.split('/');
             if(dateParts.length !== 3) continue;
             const rowDate = new Date(`${dateParts[2]}-${dateParts[0]}-${dateParts[1]}`); 
             
             const diffDays = (nowMs - rowDate.getTime()) / (1000 * 3600 * 24);
-            if (diffDays > 7 || diffDays < 0) continue; // Solo últimos 7 días estrictos
+            if (diffDays > 7 || diffDays < 0) continue;
 
             const type = row.transactionType.toLowerCase();
             const isSale = type.includes('sell') || type.includes('sale');
@@ -1014,15 +1056,16 @@ function loadNewsTab(source, btnContext = null) {
 
 async function fetchEmpresaNews(compName, ticker, source) {
     try {
-        const cleanName = compName.replace(/(Inc\.|Corp\.|Ltd\.|Company)/gi, '').trim();
+        const cleanName = compName.replace(/(Inc\.|Corp\.|Ltd\.|Company|Group|S\.A\.|PLC|N\.V\.)/gi, '').trim();
         let sourceQuery = '';
         
         if (source === 'Investing') sourceQuery = 'site:investing.com';
         else if (source === 'Reuters') sourceQuery = 'site:reuters.com';
         else if (source === 'Bloomberg') sourceQuery = 'site:bloomberg.com';
-        else sourceQuery = '(site:investing.com OR site:reuters.com OR site:bloomberg.com)'; // "Todas"
+        else sourceQuery = '(site:investing.com OR site:reuters.com OR site:bloomberg.com)'; 
         
-        const query = encodeURIComponent(`("${base(ticker)}" OR "${cleanName}") ${sourceQuery}`);
+        // Buscar exclusivamente por nombre para mayor precisión
+        const query = encodeURIComponent(`"${cleanName}" ${sourceQuery}`);
         const rssUrl = `https://news.google.com/rss/search?q=${query}+when:3d&hl=en-US&gl=US`;
         
         const res = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(rssUrl)}`);
@@ -1032,46 +1075,51 @@ async function fetchEmpresaNews(compName, ticker, source) {
         const xml = parser.parseFromString(data.contents, "text/xml");
         const items = xml.querySelectorAll("item");
         
-        if(items.length === 0) {
+        let newsItems = [];
+        
+        for(let i=0; i < items.length; i++) {
+            const pubDateStr = items[i].querySelector("pubDate")?.textContent;
+            if(pubDateStr) {
+              const d = new Date(pubDateStr);
+              const diffDays = (Date.now() - d.getTime()) / (1000*3600*24);
+              if (diffDays <= 4) {
+                 newsItems.push({
+                     title: items[i].querySelector("title")?.textContent || "",
+                     link: items[i].querySelector("link")?.textContent || "#",
+                     date: d,
+                     dateStr: fmtES(d)
+                 });
+              }
+            }
+        }
+
+        if(newsItems.length === 0) {
             document.getElementById('detNews').innerHTML = `<span style="color:var(--muted)">No hay noticias relevantes en los últimos 3 días.</span>`;
             return;
         }
+        
+        // Ordenar de más reciente a más antigua
+        newsItems.sort((a,b) => b.date - a.date);
+        const topNews = newsItems.slice(0, 5);
+
+        // Traducir todos a la vez (en paralelo) para máxima velocidad
+        await Promise.all(topNews.map(async (item) => {
+            item.titleES = await traducirTexto(item.title);
+        }));
 
         let html = '<ul class="news-list">';
-        let count = 0;
-        
-        for(let i=0; i < items.length; i++) {
-            const titleOriginal = items[i].querySelector("title")?.textContent || "";
-            const link = items[i].querySelector("link")?.textContent || "#";
-            const pubDateStr = items[i].querySelector("pubDate")?.textContent || "";
-            
-            let dateStr = "Reciente";
-            if(pubDateStr) {
-              const d = new Date(pubDateStr);
-              // Filter to max 3 days
-              const diffDays = (Date.now() - d.getTime()) / (1000*3600*24);
-              if (diffDays > 4) continue; 
-              dateStr = fmtES(d);
-            }
-            
-            const titleES = await traducirTexto(titleOriginal);
-            
+        topNews.forEach(item => {
             html += `<li>
-                <div class="news-date">${dateStr}</div>
-                <a href="${link}" target="_blank" class="news-title">${titleES}</a>
+                <div class="news-date">${item.dateStr}</div>
+                <a href="${item.link}" target="_blank" class="news-title">${item.titleES}</a>
             </li>`;
-            count++;
-            if(count >= 5) break;
-        }
+        });
         html += '</ul>';
         
-        if(count === 0) {
-            document.getElementById('detNews').innerHTML = `<span style="color:var(--muted)">No hay noticias relevantes en los últimos 3 días.</span>`;
-        } else {
-            document.getElementById('detNews').innerHTML = html;
-        }
+        document.getElementById('detNews').innerHTML = html;
+        
     } catch(e) {
-        document.getElementById('detNews').innerHTML = `<span style="color:var(--muted)">Fallo al descargar/traducir noticias.</span>`;
+        document.getElementById('detNews').innerHTML = `<span style="color:var(--muted)">Fallo al descargar noticias. Inténtalo de nuevo.</span>`;
     }
 }
 </script>
