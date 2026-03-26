@@ -407,7 +407,7 @@ async function init() {
          if(e.message !== "Cancelado por el usuario") console.error(e);
       });
 
-    // Cargar sectores vía Wikipedia API instantáneamente (sin proxies)
+    // Cargar sectores vía Wikipedia API instantáneamente (sin proxies, sin bloqueos)
     loadSectorsWikipedia(signal).catch(e => {});
 
   } catch(e) {
@@ -417,19 +417,26 @@ async function init() {
   }
 }
 
-// --- SECTORES VÍA WIKIPEDIA API DIRECTA (0 CORS, 0 PROXIES) ---
+// --- SECTORES VÍA WIKIPEDIA API DIRECTA (Sin CORS, Sin Proxies) ---
 async function fetchSectorWikipedia(name, ticker, signal) {
   try {
-    const cleanName = name.replace(/(Inc\.|Corp\.|Ltd\.|Company|Holdings|Group)/gi, '').trim();
+    // Limpieza agresiva del nombre para facilitar la búsqueda en Wikipedia
+    const cleanName = name.replace(/(Inc\.|Corp\.|Ltd\.|Company|Holdings|Group|Plc|S\.A\.|N\.V\.|Corporation|Incorporated|Technologies)/gi, '').trim();
     
-    // Búsqueda directa en Wikipedia (API nativa que no bloquea CORS)
-    const searchUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(cleanName + ' ' + ticker)}&utf8=&format=json&origin=*`;
-    const searchRes = await fetch(searchUrl, { signal });
-    const searchData = await searchRes.json();
+    let searchUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(cleanName)}&utf8=&format=json&origin=*`;
+    let searchRes = await fetch(searchUrl, { signal });
+    let searchData = await searchRes.json();
     
-    if (!searchData.query.search.length) return 'Otros';
+    if (!searchData.query.search.length) {
+      // Si falla por nombre, buscamos directamente el ticker y la palabra company
+      searchUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(ticker + ' company')}&utf8=&format=json&origin=*`;
+      searchRes = await fetch(searchUrl, { signal });
+      searchData = await searchRes.json();
+      if (!searchData.query.search.length) return 'Otros';
+    }
     
     const title = searchData.query.search[0].title;
+    const snippet = searchData.query.search[0].snippet.toLowerCase(); 
     
     const extractUrl = `https://en.wikipedia.org/w/api.php?action=query&prop=extracts&exintro&explaintext&redirects=1&titles=${encodeURIComponent(title)}&format=json&origin=*`;
     const extractRes = await fetch(extractUrl, { signal });
@@ -437,21 +444,23 @@ async function fetchSectorWikipedia(name, ticker, signal) {
     
     const pages = extractData.query.pages;
     const pageId = Object.keys(pages)[0];
-    const text = (pages[pageId].extract || '').toLowerCase();
+    const text = ((pages[pageId].extract || '') + ' ' + snippet).toLowerCase();
     
     // Algoritmo de mapeo de palabras clave al sector en español
-    if (text.match(/technology|software|computer|cybersecurity|cloud|semiconductor|electronics|internet/)) return 'Tecnología';
-    if (text.match(/health|pharmaceutical|biotechnology|medical|clinical/)) return 'Salud';
-    if (text.match(/bank|finance|financial|investment|insurance|payment/)) return 'Finanzas';
-    if (text.match(/retail|consumer|apparel|restaurant|entertainment|e-commerce/)) return 'Consumo Discrecional';
-    if (text.match(/energy|oil|gas|petroleum|solar|wind/)) return 'Energía';
-    if (text.match(/industrial|manufacturing|machinery|aerospace|defense/)) return 'Industriales';
-    if (text.match(/real estate|reit|property/)) return 'Inmobiliario';
-    if (text.match(/materials|mining|chemical|steel|gold/)) return 'Materiales Básicos';
-    if (text.match(/food|beverage|grocery|household/)) return 'Consumo Defensivo';
-    if (text.match(/utility|electric|water|power/)) return 'Utilities';
-    if (text.match(/telecom|communication|media|broadcasting/)) return 'Comunicación';
-    if (text.match(/crypto|bitcoin|blockchain/)) return 'Cripto/Blockchain';
+    // (Añadido crypto para Tecnología y keywords mejoradas para evitar 'Otros')
+    const t = text;
+    if (t.match(/crypto|bitcoin|blockchain/)) return 'Tecnología';
+    if (t.match(/health|pharm|bio|medic|clinic|therap|oncolog/)) return 'Salud';
+    if (t.match(/bank|financ|invest|insur|payment|asset management|capital|equity/)) return 'Finanzas';
+    if (t.match(/technolog|software|computer|cyber|cloud|semiconductor|electronic|internet|saas|ai |artificial intelligence|data /)) return 'Tecnología';
+    if (t.match(/retail|consumer|apparel|restaurant|entertainment|e-commerce|automotive|vehicle|luxury/)) return 'Consumo Discrecional';
+    if (t.match(/energy|oil|gas|petroleum|solar|wind|renewable/)) return 'Energía';
+    if (t.match(/industrial|manufactur|machinery|aerospace|defense|logistic|transport|freight/)) return 'Industriales';
+    if (t.match(/real estate|reit|property|estate/)) return 'Inmobiliario';
+    if (t.match(/material|mining|chemical|steel|gold|silver|copper|lithium|metal|mineral/)) return 'Materiales Básicos';
+    if (t.match(/food|beverage|grocery|household|tobacco|supermarket/)) return 'Consumo Defensivo';
+    if (t.match(/utility|electric|water|power/)) return 'Utilities';
+    if (t.match(/telecom|communicat|media|broadcast|wireless/)) return 'Comunicación';
 
     return 'Otros';
   } catch (e) {
@@ -460,7 +469,7 @@ async function fetchSectorWikipedia(name, ticker, signal) {
 }
 
 async function loadSectorsWikipedia(signal) {
-  // Al no usar proxies, podemos disparar todas las peticiones a la vez (Wikipedia lo soporta perfectamente)
+  // Sin proxies podemos hacer las peticiones rápido en paralelo
   await Promise.all(companies.map(async (c) => {
       if (signal && signal.aborted) return;
       if (c.sector === 'Cargando...') {
@@ -633,7 +642,7 @@ function renderWeek(which, items, weekDates) {
     const key = date.toISOString().split('T')[0];
     const di = byDate[key] || [];
     
-    // Comprobación segura inlined en vez de llamar a isToday
+    // Comprobación segura inlined para evitar errores de ReferenceError
     const isDayToday = date.toDateString() === new Date().toDateString();
     
     let compsHtml = '<span class="day-empty">—</span>';
