@@ -98,11 +98,15 @@
   .company-table tr:last-child td { border-bottom: none; }
   .td-ticker { font-weight: 600; width: 15%; }
   .td-name { color: var(--text); font-weight: 500; width: 35%; }
-  .td-sector { color: var(--muted); width: 25%; font-size: 12px; }
+  .td-sector { width: 25%; }
   .td-alerts { width: 25%; text-align: right; }
 
+  /* Sector Dropdown */
+  .sector-select { background: var(--surface); color: var(--text); border: 1px solid var(--border); padding: 6px 10px; border-radius: 6px; font-family: inherit; font-size: 12px; width: 100%; outline: none; cursor: pointer; transition: border-color 0.2s; }
+  .sector-select:hover, .sector-select:focus { border-color: var(--accent); }
+
   /* Enlace Ticker */
-  .ticker-link { color: var(--accent); text-decoration: none; border-bottom: 1px dashed var(--accent); transition: opacity 0.2s; }
+  .ticker-link { color: var(--accent); text-decoration: none; border-bottom: 1px dashed var(--accent); transition: opacity 0.2s; cursor: pointer; }
   .ticker-link:hover { opacity: 0.7; }
 
   /* Alertas Badges */
@@ -156,6 +160,14 @@
   .square-ind { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; }
   .sq-red { background: var(--red); }
   .sq-green { background: var(--green); }
+  
+  /* Noticias (Empresa) */
+  .news-list { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 14px; }
+  .news-list li { border-bottom: 1px solid var(--border); padding-bottom: 14px; }
+  .news-list li:last-child { border-bottom: none; padding-bottom: 0; }
+  .news-date { font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+  .news-title { color: var(--text); text-decoration: none; font-weight: 500; font-size: 14px; transition: color 0.2s; }
+  .news-title:hover { color: var(--accent); }
 </style>
 </head>
 <body>
@@ -203,12 +215,41 @@
             <tr>
               <th id="th-ticker" onclick="sortTable('yahooTicker')">Ticker</th>
               <th id="th-name" onclick="sortTable('name')">Empresa</th>
-              <th id="th-sector" onclick="sortTable('sector')">Sector</th>
+              <th id="th-sector" onclick="sortTable('sector')">Sector (Desplegable)</th>
               <th>Alertas (Automáticas)</th>
             </tr>
           </thead>
           <tbody id="tableBody"></tbody>
         </table>
+      </div>
+    </div>
+
+    <!-- PESTAÑA ESPECÍFICA: DETALLES DE EMPRESA -->
+    <div class="page" id="page-empresa">
+      <div class="page-header" style="display: flex; flex-direction: column; align-items: flex-start;">
+        <button class="btn btn-ghost" onclick="goTo('cartera')" style="margin-bottom: 20px;">← Volver a Mi Cartera</button>
+        <h2 id="detNombre">Empresa</h2>
+        <p id="detTicker" style="font-family: monospace; color: var(--accent); font-weight: 600; font-size: 16px;">TICKER</p>
+      </div>
+      
+      <div style="margin-bottom: 24px;">
+        <a id="btnInvesting" href="#" target="_blank" class="btn btn-primary">VER EN INVESTING PRO</a>
+      </div>
+
+      <div class="cartera-grid">
+        <div class="card">
+          <div class="card-label">Próximo Resultado (Earnings)</div>
+          <div id="detEarnings" style="min-height: 40px; display: flex; align-items: center;">⏳ Cargando...</div>
+        </div>
+        <div class="card">
+          <div class="card-label">Últimos Insiders (Relevantes)</div>
+          <div id="detInsiders">⏳ Analizando...</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-label">Noticias de Alto Impacto</div>
+        <div id="detNews">⏳ Buscando noticias...</div>
       </div>
     </div>
 
@@ -253,6 +294,12 @@
 const SHEET_CSV = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSXSofvMaT7bYXduO3ywx6Pg5q-cZccTc2GcitfKbv9pvqaDIW_0xR2RHamWwt1h6KVxpf5Vm0EwLe-/pub?output=csv';
 const DAYS_ES = ['Lunes','Martes','Miércoles','Jueves','Viernes'];
 const XMAP = {'lon':'.L','lse':'.L','epa':'.PA','ams':'.AS','bru':'.BR','asx':'.AX','tse':'.TO','tsx':'.TO','cve':'.V','bit':'.MI','xetr':'.DE','fra':'.DE','bme':'.MC','swx':'.SW','hkex':'.HK','tyo':'.T','nse':'.NS','bse':'.BO'};
+
+const SECTORS_LIST = [
+  'Tecnología', 'Salud', 'Finanzas', 'Consumo Discrecional', 'Comunicación', 
+  'Industriales', 'Consumo Defensivo', 'Energía', 'Utilities', 'Inmobiliario', 
+  'Materiales Básicos', 'Cripto/Blockchain', 'Otros'
+];
 
 let companies = [];
 let chartInstance = null;
@@ -311,7 +358,7 @@ async function fetchApiJson(url, signal) {
   throw new Error(lastErr);
 }
 
-// --- UTILIDADES ---
+// --- UTILIDADES DECLARADAS A NIVEL GLOBAL ---
 function toYahoo(raw) {
   if(!raw) return null;
   const c = raw.trim();
@@ -339,17 +386,27 @@ function fmtES(d) {
   return d.toLocaleDateString('es-ES', { day: '2-digit', month: 'short' });
 }
 
+function toISO(d) {
+  return d.toISOString().split('T')[0];
+}
+
+// Nueva implementación de isToday asegurada
+const isToday = (d) => {
+  return d.toDateString() === new Date().toDateString();
+};
+
 const CW = getWeekDates(0);
 const NW = getWeekDates(1);
 
-document.getElementById('subCurrent').textContent = `${CW[0].toLocaleDateString('es-ES', { day: '2-digit', month: 'short' })} — ${CW[4].toLocaleDateString('es-ES', { day: '2-digit', month: 'short' })}`;
-document.getElementById('subNext').textContent = `${NW[0].toLocaleDateString('es-ES', { day: '2-digit', month: 'short' })} — ${NW[4].toLocaleDateString('es-ES', { day: '2-digit', month: 'short' })}`;
+document.getElementById('subCurrent').textContent = `${fmtES(CW[0])} — ${fmtES(CW[4])}`;
+document.getElementById('subNext').textContent = `${fmtES(NW[0])} — ${fmtES(NW[4])}`;
 
 function goTo(page) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   document.getElementById('page-'+page).classList.add('active');
-  document.getElementById('nav-'+page).classList.add('active');
+  const navItem = document.getElementById('nav-'+page);
+  if(navItem) navItem.classList.add('active'); // La pestaña empresa no tiene nav-item
 }
 
 window.addEventListener('load', init);
@@ -375,6 +432,7 @@ async function init() {
     if(!res.ok) throw new Error('Error HTTP ' + res.status);
     const lines = (await res.text()).trim().split('\n');
     const seen = new Set();
+    const savedSectors = JSON.parse(localStorage.getItem('manualSectors') || '{}');
     
     lines.forEach(line => {
       const cols = parseCSVLine(line);
@@ -387,7 +445,9 @@ async function init() {
         if(ci+1 < cols.length && cols[ci+1] && cols[ci+1].length > 1) name = cols[ci+1];
         seen.add(yahoo);
         
-        companies.push({ name, origTicker: val, yahooTicker: yahoo, sector: 'Cargando...' });
+        // Cargamos sector guardado manualmente o marcamos para buscar
+        let sectorFinal = savedSectors[yahoo] || 'Cargando...';
+        companies.push({ name, origTicker: val, yahooTicker: yahoo, sector: sectorFinal });
       }
     });
     
@@ -400,14 +460,14 @@ async function init() {
     sortTable('name'); 
     updateChartFromCompanies();
     
-    // Lanzar tareas sin bloquear
+    // Lanzar tareas de earnings e insiders
     fetchEarnings(true, signal)
       .then(() => fetchInsiders(true, signal))
       .catch(e => {
          if(e.message !== "Cancelado por el usuario") console.error(e);
       });
 
-    // Cargar sectores vía Wikipedia API instantáneamente (sin proxies, sin bloqueos)
+    // Cargar sectores vía Wikipedia solo para los que no estén guardados
     loadSectorsWikipedia(signal).catch(e => {});
 
   } catch(e) {
@@ -417,23 +477,28 @@ async function init() {
   }
 }
 
-// --- SECTORES VÍA WIKIPEDIA API DIRECTA (Sin CORS, Sin Proxies) ---
+// --- ACTUALIZACIÓN MANUAL DE SECTORES ---
+window.updateSector = function(ticker, newSector) {
+    const comp = companies.find(c => c.yahooTicker === ticker);
+    if(comp) comp.sector = newSector;
+    
+    // Guardar elección del usuario en localStorage
+    const saved = JSON.parse(localStorage.getItem('manualSectors') || '{}');
+    saved[ticker] = newSector;
+    localStorage.setItem('manualSectors', JSON.stringify(saved));
+    
+    updateChartFromCompanies();
+};
+
+// --- SECTORES VÍA WIKIPEDIA (Para autocompletar si no hay guardado) ---
 async function fetchSectorWikipedia(name, ticker, signal) {
   try {
-    // Limpieza agresiva del nombre para facilitar la búsqueda en Wikipedia
     const cleanName = name.replace(/(Inc\.|Corp\.|Ltd\.|Company|Holdings|Group|Plc|S\.A\.|N\.V\.|Corporation|Incorporated|Technologies)/gi, '').trim();
-    
     let searchUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(cleanName)}&utf8=&format=json&origin=*`;
     let searchRes = await fetch(searchUrl, { signal });
     let searchData = await searchRes.json();
     
-    if (!searchData.query.search.length) {
-      // Si falla por nombre, buscamos directamente el ticker y la palabra company
-      searchUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(ticker + ' company')}&utf8=&format=json&origin=*`;
-      searchRes = await fetch(searchUrl, { signal });
-      searchData = await searchRes.json();
-      if (!searchData.query.search.length) return 'Otros';
-    }
+    if (!searchData.query.search.length) return 'Otros';
     
     const title = searchData.query.search[0].title;
     const snippet = searchData.query.search[0].snippet.toLowerCase(); 
@@ -446,10 +511,8 @@ async function fetchSectorWikipedia(name, ticker, signal) {
     const pageId = Object.keys(pages)[0];
     const text = ((pages[pageId].extract || '') + ' ' + snippet).toLowerCase();
     
-    // Algoritmo de mapeo de palabras clave al sector en español
-    // (Añadido crypto para Tecnología y keywords mejoradas para evitar 'Otros')
     const t = text;
-    if (t.match(/crypto|bitcoin|blockchain/)) return 'Tecnología';
+    if (t.match(/crypto|bitcoin|blockchain/)) return 'Cripto/Blockchain';
     if (t.match(/health|pharm|bio|medic|clinic|therap|oncolog/)) return 'Salud';
     if (t.match(/bank|financ|invest|insur|payment|asset management|capital|equity/)) return 'Finanzas';
     if (t.match(/technolog|software|computer|cyber|cloud|semiconductor|electronic|internet|saas|ai |artificial intelligence|data /)) return 'Tecnología';
@@ -469,16 +532,13 @@ async function fetchSectorWikipedia(name, ticker, signal) {
 }
 
 async function loadSectorsWikipedia(signal) {
-  // Sin proxies podemos hacer las peticiones rápido en paralelo
   await Promise.all(companies.map(async (c) => {
       if (signal && signal.aborted) return;
       if (c.sector === 'Cargando...') {
           c.sector = await fetchSectorWikipedia(c.name, base(c.yahooTicker), signal);
       }
   }));
-  
   if (signal && signal.aborted) return;
-  
   renderCarteraTable();
   updateChartFromCompanies();
 }
@@ -504,7 +564,7 @@ function sortTable(col) {
     return 0;
   });
   
-  const headers = { 'yahooTicker': 'Ticker', 'name': 'Empresa', 'sector': 'Sector' };
+  const headers = { 'yahooTicker': 'Ticker', 'name': 'Empresa', 'sector': 'Sector (Desplegable)' };
   Object.keys(headers).forEach(k => {
     const th = document.getElementById('th-' + (k === 'yahooTicker' ? 'ticker' : k));
     if(th) th.textContent = headers[k] + (currentSort.column === k ? (currentSort.asc ? ' ▲' : ' ▼') : '');
@@ -521,10 +581,20 @@ function renderCarteraTable() {
     if(earningsAlerts.has(c.yahooTicker)) alertsHtml += `<span class="alert-badge alert-earn" onclick="goTo('resultados')">Resultados</span>`;
     if(insiderAlerts.has(c.yahooTicker)) alertsHtml += `<span class="alert-badge alert-ins" onclick="goTo('insiders')">Insiders</span>`;
     
-    const tickerLink = `<a href="https://es.investing.com/pro/${base(c.yahooTicker)}" target="_blank" class="ticker-link">${c.yahooTicker}</a>`;
+    // Ticker abre la pestaña de detalles
+    const tickerLink = `<a href="#" onclick="abrirEmpresa('${c.yahooTicker}'); return false;" class="ticker-link">${c.yahooTicker}</a>`;
     
+    // Select dropdown para sectores
+    const sectorsOptions = SECTORS_LIST.map(s => `<option value="${s}" ${c.sector === s ? 'selected' : ''}>${s}</option>`).join('');
+    const sectorSelect = `
+      <select class="sector-select" onchange="updateSector('${c.yahooTicker}', this.value)">
+        ${c.sector !== 'Cargando...' && !SECTORS_LIST.includes(c.sector) ? `<option value="${c.sector}" selected>${c.sector}</option>` : ''}
+        ${sectorsOptions}
+        ${c.sector === 'Cargando...' ? `<option value="Cargando..." selected disabled>Cargando...</option>` : ''}
+      </select>`;
+
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td class="td-ticker">${tickerLink}</td><td class="td-name">${c.name}</td><td class="td-sector">${c.sector}</td><td class="td-alerts">${alertsHtml}</td>`;
+    tr.innerHTML = `<td class="td-ticker">${tickerLink}</td><td class="td-name">${c.name}</td><td class="td-sector">${sectorSelect}</td><td class="td-alerts">${alertsHtml}</td>`;
     tbody.appendChild(tr);
   });
 }
@@ -578,7 +648,7 @@ async function fetchEarnings(isBackground = false, signal = activeRequests.signa
   });
 
   const settled = await Promise.allSettled([...CW, ...NW].map(d => {
-    const dISO = d.toISOString().split('T')[0];
+    const dISO = toISO(d);
     return fetchApiJson(`https://api.nasdaq.com/api/calendar/earnings?date=${dISO}`, signal)
       .then(json => (json?.data?.rows || []).flatMap(row => {
         const t = (row.symbol||'').toUpperCase().trim();
@@ -615,10 +685,9 @@ async function fetchEarnings(isBackground = false, signal = activeRequests.signa
   }
 
   const unique = results.filter((r, i, a) => a.findIndex(x => x.ticker === r.ticker) === i).sort((a,b) => a.name.localeCompare(b.name));
-  const curr = unique.filter(r => CW.some(d => d.toISOString().split('T')[0] === r.date));
-  const next = unique.filter(r => NW.some(d => d.toISOString().split('T')[0] === r.date));
+  const curr = unique.filter(r => CW.some(d => toISO(d) === r.date));
+  const next = unique.filter(r => NW.some(d => toISO(d) === r.date));
 
-  // Actualizar Alertas
   earningsAlerts = new Set(curr.map(r => r.ticker));
   renderCarteraTable();
 
@@ -639,11 +708,9 @@ function renderWeek(which, items, weekDates) {
   
   let html = '';
   weekDates.forEach((date, i) => {
-    const key = date.toISOString().split('T')[0];
+    const key = toISO(date);
     const di = byDate[key] || [];
-    
-    // Comprobación segura inlined para evitar errores de ReferenceError
-    const isDayToday = date.toDateString() === new Date().toDateString();
+    const isDayToday = isToday(date); // Usamos nuestra función asegurada
     
     let compsHtml = '<span class="day-empty">—</span>';
     if(di.length > 0) {
@@ -651,7 +718,7 @@ function renderWeek(which, items, weekDates) {
         <div class="earn-chip"><div class="earn-chip-top"><span class="earn-ticker">${it.ticker}</span><span class="earn-time ${it.timeClass}">${it.timeLabel}</span></div><span class="earn-name">${it.name}</span></div>
       `).join('');
     }
-    html += `<div class="day-block"><div class="day-row"><div class="day-name-col ${isDayToday ? 'today-col' : ''}"><div class="day-name-txt">${DAYS_ES[i]} ${isDayToday ? '<span class="today-dot">HOY</span>' : ''}</div><div class="day-date-txt">${date.toLocaleDateString('es-ES', { day: '2-digit', month: 'short' })}</div></div><div class="day-companies">${compsHtml}</div></div></div>`;
+    html += `<div class="day-block"><div class="day-row"><div class="day-name-col ${isDayToday ? 'today-col' : ''}"><div class="day-name-txt">${DAYS_ES[i]} ${isDayToday ? '<span class="today-dot">HOY</span>' : ''}</div><div class="day-date-txt">${fmtES(date)}</div></div><div class="day-companies">${compsHtml}</div></div></div>`;
   });
   bodyEl.innerHTML = html;
 }
@@ -719,7 +786,6 @@ async function fetchInsiders(isBackground = false, signal = activeRequests.signa
 
     const activeTickers = Object.keys(tradesByTicker);
     
-    // Actualizar Alertas
     insiderAlerts = new Set(activeTickers);
     renderCarteraTable();
 
@@ -758,6 +824,122 @@ async function fetchInsiders(isBackground = false, signal = activeRequests.signa
     if(!isBackground && err.message !== "Cancelado por el usuario") container.innerHTML = `<div class="card"><p style="color:var(--red)">⚠️ Error interno: ${err.message}</p></div>`;
   }
   if(!isBackground) { btn.disabled = false; btn.textContent = '▶ ACTUALIZAR INSIDERS'; }
+}
+
+// --- VISTA DETALLES DE EMPRESA ---
+async function abrirEmpresa(ticker) {
+    const comp = companies.find(c => c.yahooTicker === ticker);
+    if(!comp) return;
+
+    document.getElementById('detNombre').textContent = comp.name;
+    document.getElementById('detTicker').textContent = comp.yahooTicker;
+    document.getElementById('btnInvesting').href = `https://es.investing.com/pro/${base(comp.yahooTicker)}`;
+
+    goTo('empresa');
+
+    document.getElementById('detEarnings').innerHTML = '⏳ Buscando fecha confirmada...';
+    document.getElementById('detInsiders').innerHTML = '⏳ Analizando últimos registros...';
+    document.getElementById('detNews').innerHTML = '⏳ Rastreando titulares de alto impacto...';
+
+    fetchEmpresaEarnings(comp.yahooTicker);
+    fetchEmpresaInsiders(comp.yahooTicker);
+    fetchEmpresaNews(comp.yahooTicker);
+}
+
+async function fetchEmpresaEarnings(ticker) {
+    try {
+        const url = `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(base(ticker))}?modules=calendarEvents`;
+        const data = await fetchApiJson(url);
+        const events = data?.quoteSummary?.result?.[0]?.calendarEvents?.earnings;
+        if(events && events.earningsDate && events.earningsDate.length > 0) {
+            const dateTs = events.earningsDate[0].raw * 1000;
+            const d = new Date(dateTs);
+            document.getElementById('detEarnings').innerHTML = `<div style="font-size:18px; font-weight:700; color:var(--accent)">${fmtES(d)} de ${d.getFullYear()}</div>`;
+        } else {
+            document.getElementById('detEarnings').innerHTML = `<span style="color:var(--muted)">Fecha no disponible o sin confirmar oficialmente</span>`;
+        }
+    } catch(e) {
+        document.getElementById('detEarnings').innerHTML = `<span style="color:var(--muted)">No disponible</span>`;
+    }
+}
+
+async function fetchEmpresaInsiders(ticker) {
+    try {
+        const json = await fetchApiJson(`https://api.nasdaq.com/api/company/${base(ticker).toLowerCase()}/insider-trades?limit=50&type=ALL`);
+        const rows = json?.data?.transactionTable?.table?.rows || [];
+        
+        let html = '<table class="ins-table"><thead><tr><th>Fecha</th><th>Operación</th><th>Valor</th></tr></thead><tbody>';
+        let found = 0;
+        
+        for(const row of rows) {
+            if(!row.lastDate || !row.transactionType) continue;
+            const type = row.transactionType.toLowerCase();
+            const isSale = type.includes('sell') || type.includes('sale');
+            const isBuy = type.includes('buy') || type.includes('purchase');
+            if (!isSale && !isBuy) continue; 
+
+            const shares = parseFloat((row.sharesTraded || '0').replace(/,/g, ''));
+            const price = parseFloat((row.lastPrice || '0').replace(/,/g, ''));
+            const valNum = shares * price;
+            if(valNum < 1000) continue; // Filtro de ruido
+
+            const valStr = '$' + valNum.toLocaleString('en-US', {maximumFractionDigits: 0});
+            
+            html += `<tr>
+              <td class="ins-mono">${row.lastDate}</td>
+              <td style="color: ${isSale ? 'var(--red)' : 'var(--green)'}; font-weight:600;"><span class="square-ind ${isSale ? 'sq-red' : 'sq-green'}"></span>${isSale ? 'Venta' : 'Compra'}</td>
+              <td class="ins-mono" style="font-weight:700">${valStr}</td>
+            </tr>`;
+            
+            found++;
+            if(found >= 5) break; // Solo las top 5
+        }
+        html += '</tbody></table>';
+        
+        if(found === 0) document.getElementById('detInsiders').innerHTML = `<span style="color:var(--muted)">Sin movimientos de mercado significativos recientes.</span>`;
+        else document.getElementById('detInsiders').innerHTML = html;
+
+    } catch(e) {
+        document.getElementById('detInsiders').innerHTML = `<span style="color:var(--muted)">No se pudo extraer la información.</span>`;
+    }
+}
+
+async function fetchEmpresaNews(ticker) {
+    try {
+        const rssUrl = `https://feeds.finance.yahoo.com/rss/2.0/headline?s=${base(ticker)}`;
+        const res = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(rssUrl)}`);
+        const data = await res.json();
+        
+        const parser = new DOMParser();
+        const xml = parser.parseFromString(data.contents, "text/xml");
+        const items = xml.querySelectorAll("item");
+        
+        if(items.length === 0) {
+            document.getElementById('detNews').innerHTML = `<span style="color:var(--muted)">No hay titulares recientes relevantes.</span>`;
+            return;
+        }
+
+        let html = '<ul class="news-list">';
+        for(let i=0; i < Math.min(5, items.length); i++) {
+            const title = items[i].querySelector("title")?.textContent || "";
+            const link = items[i].querySelector("link")?.textContent || "#";
+            const pubDate = items[i].querySelector("pubDate")?.textContent || "";
+            let dateStr = "Reciente";
+            if(pubDate) {
+              const d = new Date(pubDate);
+              dateStr = fmtES(d) + ' de ' + d.getFullYear();
+            }
+            
+            html += `<li>
+                <div class="news-date">${dateStr}</div>
+                <a href="${link}" target="_blank" class="news-title">${title}</a>
+            </li>`;
+        }
+        html += '</ul>';
+        document.getElementById('detNews').innerHTML = html;
+    } catch(e) {
+        document.getElementById('detNews').innerHTML = `<span style="color:var(--muted)">Fallo de conexión con el feed de noticias.</span>`;
+    }
 }
 </script>
 </body>
