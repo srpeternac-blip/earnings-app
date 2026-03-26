@@ -168,6 +168,8 @@
   .news-date { font-size: 11px; color: var(--muted); margin-bottom: 4px; }
   .news-title { color: var(--text); text-decoration: none; font-weight: 500; font-size: 14px; transition: color 0.2s; }
   .news-title:hover { color: var(--accent); }
+  
+  #filtroBanner { display:none; background: rgba(2, 132, 199, 0.05); padding: 12px 20px; border-radius: 8px; margin-bottom: 16px; border: 1px dashed var(--accent); font-size: 13px; align-items: center; justify-content: space-between; }
 </style>
 </head>
 <body>
@@ -198,18 +200,22 @@
             <div class="status-pill loading" id="sheetStatus">⏳ Conectando...</div>
             <div style="margin-top: 16px; display: flex; gap: 8px;">
               <button class="btn btn-ghost" onclick="init()">↻ Forzar recarga</button>
-              <button class="btn btn-ghost" style="color: var(--red); border-color: var(--red);" onclick="stopAllTasks()">🛑 Detener tareas</button>
+              <button class="btn btn-ghost" style="color: var(--green); border-color: var(--green);" onclick="guardarSectoresManuales()">💾 Guardar Sectores</button>
             </div>
           </div>
         </div>
         
         <div class="chart-container" id="chartCard" style="display:none;">
-          <div class="card-label">Distribución Sectorial</div>
+          <div class="card-label">Distribución Sectorial (Click para filtrar)</div>
           <div class="chart-wrapper"><canvas id="sectorChart"></canvas></div>
         </div>
       </div>
 
       <div class="card" id="tableCard" style="display:none">
+        <div id="filtroBanner">
+           <span id="filtroText"></span>
+           <button onclick="quitarFiltroSector()" class="btn btn-ghost" style="padding:4px 10px;">Mostrar todos</button>
+        </div>
         <table class="company-table">
           <thead>
             <tr>
@@ -248,8 +254,8 @@
       </div>
 
       <div class="card">
-        <div class="card-label">Noticias de Alto Impacto</div>
-        <div id="detNews">⏳ Buscando noticias...</div>
+        <div class="card-label">Noticias Recientes (Últimos 3 días)</div>
+        <div id="detNews">⏳ Buscando noticias en español...</div>
       </div>
     </div>
 
@@ -306,20 +312,8 @@ let chartInstance = null;
 let currentSort = { column: 'name', asc: true };
 let earningsAlerts = new Set();
 let insiderAlerts = new Set();
-
-// Control de interrupción de tareas
+let filtroSectorActual = null;
 let activeRequests = new AbortController();
-
-function stopAllTasks() {
-  activeRequests.abort();
-  document.getElementById('sheetStatus').textContent = '🛑 Tareas detenidas por el usuario';
-  document.getElementById('sheetStatus').className = 'status-pill err';
-  document.getElementById('btnSearch').disabled = false;
-  document.getElementById('btnSearch').textContent = '▶ ACTUALIZAR EARNINGS';
-  document.getElementById('btnInsiders').disabled = false;
-  document.getElementById('btnInsiders').textContent = '▶ ACTUALIZAR INSIDERS';
-  activeRequests = new AbortController(); 
-}
 
 // --- TEMA OSCURO ---
 function toggleTheme() {
@@ -390,7 +384,6 @@ function toISO(d) {
   return d.toISOString().split('T')[0];
 }
 
-// Nueva implementación de isToday asegurada
 const isToday = (d) => {
   return d.toDateString() === new Date().toDateString();
 };
@@ -406,7 +399,7 @@ function goTo(page) {
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   document.getElementById('page-'+page).classList.add('active');
   const navItem = document.getElementById('nav-'+page);
-  if(navItem) navItem.classList.add('active'); // La pestaña empresa no tiene nav-item
+  if(navItem) navItem.classList.add('active');
 }
 
 window.addEventListener('load', init);
@@ -426,6 +419,8 @@ async function init() {
   const el = document.getElementById('sheetStatus');
   el.className = 'status-pill loading'; el.textContent = '⏳ Sincronizando...';
   companies = []; earningsAlerts.clear(); insiderAlerts.clear();
+  filtroSectorActual = null;
+  if(document.getElementById('filtroBanner')) document.getElementById('filtroBanner').style.display = 'none';
   
   try {
     const res = await fetch(SHEET_CSV + '&t=' + Date.now(), { signal });
@@ -445,7 +440,6 @@ async function init() {
         if(ci+1 < cols.length && cols[ci+1] && cols[ci+1].length > 1) name = cols[ci+1];
         seen.add(yahoo);
         
-        // Cargamos sector guardado manualmente o marcamos para buscar
         let sectorFinal = savedSectors[yahoo] || 'Cargando...';
         companies.push({ name, origTicker: val, yahooTicker: yahoo, sector: sectorFinal });
       }
@@ -460,14 +454,12 @@ async function init() {
     sortTable('name'); 
     updateChartFromCompanies();
     
-    // Lanzar tareas de earnings e insiders
     fetchEarnings(true, signal)
       .then(() => fetchInsiders(true, signal))
       .catch(e => {
          if(e.message !== "Cancelado por el usuario") console.error(e);
       });
 
-    // Cargar sectores vía Wikipedia solo para los que no estén guardados
     loadSectorsWikipedia(signal).catch(e => {});
 
   } catch(e) {
@@ -477,20 +469,47 @@ async function init() {
   }
 }
 
-// --- ACTUALIZACIÓN MANUAL DE SECTORES ---
-window.updateSector = function(ticker, newSector) {
-    const comp = companies.find(c => c.yahooTicker === ticker);
-    if(comp) comp.sector = newSector;
-    
-    // Guardar elección del usuario en localStorage
+// --- GUARDAR SECTORES MANUALMENTE ---
+window.guardarSectoresManuales = function() {
+    const selects = document.querySelectorAll('.sector-select');
     const saved = JSON.parse(localStorage.getItem('manualSectors') || '{}');
-    saved[ticker] = newSector;
-    localStorage.setItem('manualSectors', JSON.stringify(saved));
+    let savedCount = 0;
     
+    selects.forEach(sel => {
+        const ticker = sel.dataset.ticker;
+        const val = sel.value;
+        if(val && val !== 'Cargando...') {
+            saved[ticker] = val;
+            const comp = companies.find(c => c.yahooTicker === ticker);
+            if(comp) comp.sector = val;
+            savedCount++;
+        }
+    });
+    
+    localStorage.setItem('manualSectors', JSON.stringify(saved));
     updateChartFromCompanies();
+    
+    const el = document.getElementById('sheetStatus');
+    el.className = 'status-pill ok';
+    el.textContent = `✓ Sectores guardados correctamente.`;
 };
 
-// --- SECTORES VÍA WIKIPEDIA (Para autocompletar si no hay guardado) ---
+// --- FILTRAR POR SECTOR ---
+window.filtrarPorSector = function(sector) {
+  filtroSectorActual = sector;
+  const banner = document.getElementById('filtroBanner');
+  banner.style.display = 'flex';
+  document.getElementById('filtroText').innerHTML = `Viendo sector: <b>${sector}</b>`;
+  renderCarteraTable();
+};
+
+window.quitarFiltroSector = function() {
+  filtroSectorActual = null;
+  document.getElementById('filtroBanner').style.display = 'none';
+  renderCarteraTable();
+};
+
+// --- SECTORES VÍA WIKIPEDIA ---
 async function fetchSectorWikipedia(name, ticker, signal) {
   try {
     const cleanName = name.replace(/(Inc\.|Corp\.|Ltd\.|Company|Holdings|Group|Plc|S\.A\.|N\.V\.|Corporation|Incorporated|Technologies)/gi, '').trim();
@@ -576,18 +595,25 @@ function sortTable(col) {
 function renderCarteraTable() {
   const tbody = document.getElementById('tableBody');
   tbody.innerHTML = '';
-  companies.forEach(c => {
+  
+  let companiesToRender = companies;
+  if(filtroSectorActual) {
+      companiesToRender = companies.filter(c => {
+          const sec = c.sector === 'Cargando...' ? 'Desconocido / Otros' : c.sector;
+          return sec === filtroSectorActual;
+      });
+  }
+  
+  companiesToRender.forEach(c => {
     let alertsHtml = '';
     if(earningsAlerts.has(c.yahooTicker)) alertsHtml += `<span class="alert-badge alert-earn" onclick="goTo('resultados')">Resultados</span>`;
     if(insiderAlerts.has(c.yahooTicker)) alertsHtml += `<span class="alert-badge alert-ins" onclick="goTo('insiders')">Insiders</span>`;
     
-    // Ticker abre la pestaña de detalles
     const tickerLink = `<a href="#" onclick="abrirEmpresa('${c.yahooTicker}'); return false;" class="ticker-link">${c.yahooTicker}</a>`;
     
-    // Select dropdown para sectores
     const sectorsOptions = SECTORS_LIST.map(s => `<option value="${s}" ${c.sector === s ? 'selected' : ''}>${s}</option>`).join('');
     const sectorSelect = `
-      <select class="sector-select" onchange="updateSector('${c.yahooTicker}', this.value)">
+      <select class="sector-select" data-ticker="${c.yahooTicker}">
         ${c.sector !== 'Cargando...' && !SECTORS_LIST.includes(c.sector) ? `<option value="${c.sector}" selected>${c.sector}</option>` : ''}
         ${sectorsOptions}
         ${c.sector === 'Cargando...' ? `<option value="Cargando..." selected disabled>Cargando...</option>` : ''}
@@ -605,26 +631,39 @@ function updateChart(sectorsObj) {
   const isDark = document.body.classList.contains('dark-theme');
   const textColor = isDark ? '#f8fafc' : '#475569';
   
+  const totalCompanies = Object.values(sectorsObj).reduce((a,b)=>a+b, 0);
+  const labels = sorted.map(s => `${s[0]} (${Math.round(s[1]/totalCompanies*100)}%)`);
+  const pureLabels = sorted.map(s => s[0]); // Para el filtro al hacer clic
+  
   if(chartInstance) chartInstance.destroy();
   
   chartInstance = new Chart(ctx, {
-    type: 'doughnut',
+    type: 'bar',
     data: {
-      labels: sorted.map(s => s[0]),
+      labels: labels,
       datasets: [{
+        label: 'Empresas',
         data: sorted.map(s => s[1]),
-        backgroundColor: ['#0ea5e9', '#10b981', '#8b5cf6', '#f59e0b', '#ef4444', '#64748b', '#14b8a6', '#f97316', '#6366f1', '#ec4899', '#94a3b8'],
-        borderWidth: 2, borderColor: isDark ? '#1e293b' : '#ffffff'
+        backgroundColor: '#0ea5e9',
+        borderRadius: 4
       }]
     },
     options: {
-      responsive: true, maintainAspectRatio: false, cutout: '65%',
+      indexAxis: 'y',
+      responsive: true, maintainAspectRatio: false,
       plugins: {
-        legend: { position: 'right', labels: { color: textColor, font: { family: 'Inter', size: 11 }, padding: 15, usePointStyle: true } },
-        tooltip: { callbacks: { label: function(c) {
-          const total = c.dataset.data.reduce((a, b) => a + b, 0);
-          return ` ${c.raw} empresas (${Math.round((c.raw / total) * 100)}%)`;
-        }}}
+        legend: { display: false },
+        tooltip: { callbacks: { label: function(c) { return ` ${c.raw} empresas`; } } }
+      },
+      scales: {
+        x: { display: false, grid: { display: false } },
+        y: { ticks: { color: textColor, font: { family: 'Inter', size: 12 } }, grid: { display: false } }
+      },
+      onClick: (e, elements) => {
+        if (elements.length > 0) {
+          const index = elements[0].index;
+          filtrarPorSector(pureLabels[index]);
+        }
       }
     }
   });
@@ -710,7 +749,7 @@ function renderWeek(which, items, weekDates) {
   weekDates.forEach((date, i) => {
     const key = toISO(date);
     const di = byDate[key] || [];
-    const isDayToday = isToday(date); // Usamos nuestra función asegurada
+    const isDayToday = isToday(date);
     
     let compsHtml = '<span class="day-empty">—</span>';
     if(di.length > 0) {
@@ -756,10 +795,12 @@ async function fetchInsiders(isBackground = false, signal = activeRequests.signa
           const isBuy = type.includes('buy') || type.includes('purchase');
           if (!isSale && !isBuy) return; 
 
-          const shares = parseFloat((row.sharesTraded || '0').replace(/,/g, ''));
-          const price = parseFloat((row.lastPrice || '0').replace(/,/g, ''));
-          const totalValueNum = (shares * price) || 0;
+          const shares = parseFloat((row.sharesTraded || '0').replace(/,/g, '').replace(/\$/g,''));
+          const price = parseFloat((row.lastPrice || '0').replace(/,/g, '').replace(/\$/g,''));
           
+          if(isNaN(shares) || isNaN(price)) return;
+          
+          const totalValueNum = shares * price;
           if (totalValueNum < 1000) return; 
 
           let relevance = 'Media';
@@ -839,11 +880,11 @@ async function abrirEmpresa(ticker) {
 
     document.getElementById('detEarnings').innerHTML = '⏳ Buscando fecha confirmada...';
     document.getElementById('detInsiders').innerHTML = '⏳ Analizando últimos registros...';
-    document.getElementById('detNews').innerHTML = '⏳ Rastreando titulares de alto impacto...';
+    document.getElementById('detNews').innerHTML = '⏳ Rastreando titulares de alto impacto en español...';
 
     fetchEmpresaEarnings(comp.yahooTicker);
     fetchEmpresaInsiders(comp.yahooTicker);
-    fetchEmpresaNews(comp.yahooTicker);
+    fetchEmpresaNews(comp.name, comp.yahooTicker);
 }
 
 async function fetchEmpresaEarnings(ticker) {
@@ -855,12 +896,10 @@ async function fetchEmpresaEarnings(ticker) {
             const dateTs = events.earningsDate[0].raw * 1000;
             const d = new Date(dateTs);
             document.getElementById('detEarnings').innerHTML = `<div style="font-size:18px; font-weight:700; color:var(--accent)">${fmtES(d)} de ${d.getFullYear()}</div>`;
-        } else {
-            document.getElementById('detEarnings').innerHTML = `<span style="color:var(--muted)">Fecha no disponible o sin confirmar oficialmente</span>`;
+            return;
         }
-    } catch(e) {
-        document.getElementById('detEarnings').innerHTML = `<span style="color:var(--muted)">No disponible</span>`;
-    }
+    } catch(e) {}
+    document.getElementById('detEarnings').innerHTML = `<span style="color:var(--muted)">Fecha no disponible o sin confirmar oficialmente</span>`;
 }
 
 async function fetchEmpresaInsiders(ticker) {
@@ -878,8 +917,11 @@ async function fetchEmpresaInsiders(ticker) {
             const isBuy = type.includes('buy') || type.includes('purchase');
             if (!isSale && !isBuy) continue; 
 
-            const shares = parseFloat((row.sharesTraded || '0').replace(/,/g, ''));
-            const price = parseFloat((row.lastPrice || '0').replace(/,/g, ''));
+            const shares = parseFloat((row.sharesTraded || '0').replace(/,/g, '').replace(/\$/g,''));
+            const price = parseFloat((row.lastPrice || '0').replace(/,/g, '').replace(/\$/g,''));
+            
+            if(isNaN(shares) || isNaN(price)) continue;
+            
             const valNum = shares * price;
             if(valNum < 1000) continue; // Filtro de ruido
 
@@ -904,9 +946,12 @@ async function fetchEmpresaInsiders(ticker) {
     }
 }
 
-async function fetchEmpresaNews(ticker) {
+async function fetchEmpresaNews(compName, ticker) {
     try {
-        const rssUrl = `https://feeds.finance.yahoo.com/rss/2.0/headline?s=${base(ticker)}`;
+        // Uso de Google News RSS filtrado por los últimos 3 días (when:3d) y en español
+        const query = encodeURIComponent(`"${base(ticker)}" OR "${compName}"`);
+        const rssUrl = `https://news.google.com/rss/search?q=${query}+when:3d&hl=es&gl=ES&ceid=ES:es`;
+        
         const res = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(rssUrl)}`);
         const data = await res.json();
         
@@ -915,18 +960,24 @@ async function fetchEmpresaNews(ticker) {
         const items = xml.querySelectorAll("item");
         
         if(items.length === 0) {
-            document.getElementById('detNews').innerHTML = `<span style="color:var(--muted)">No hay titulares recientes relevantes.</span>`;
+            document.getElementById('detNews').innerHTML = `<span style="color:var(--muted)">No hay noticias relevantes en los últimos 3 días.</span>`;
             return;
         }
 
         let html = '<ul class="news-list">';
-        for(let i=0; i < Math.min(5, items.length); i++) {
+        let count = 0;
+        for(let i=0; i < items.length; i++) {
             const title = items[i].querySelector("title")?.textContent || "";
             const link = items[i].querySelector("link")?.textContent || "#";
-            const pubDate = items[i].querySelector("pubDate")?.textContent || "";
+            const pubDateStr = items[i].querySelector("pubDate")?.textContent || "";
+            
             let dateStr = "Reciente";
-            if(pubDate) {
-              const d = new Date(pubDate);
+            if(pubDateStr) {
+              const d = new Date(pubDateStr);
+              // Doble check de seguridad para asegurar que no pasen de 4 días
+              const diffDays = (Date.now() - d.getTime()) / (1000*3600*24);
+              if (diffDays > 4) continue;
+              
               dateStr = fmtES(d) + ' de ' + d.getFullYear();
             }
             
@@ -934,9 +985,16 @@ async function fetchEmpresaNews(ticker) {
                 <div class="news-date">${dateStr}</div>
                 <a href="${link}" target="_blank" class="news-title">${title}</a>
             </li>`;
+            count++;
+            if(count >= 5) break;
         }
         html += '</ul>';
-        document.getElementById('detNews').innerHTML = html;
+        
+        if(count === 0) {
+            document.getElementById('detNews').innerHTML = `<span style="color:var(--muted)">No hay noticias relevantes en los últimos 3 días.</span>`;
+        } else {
+            document.getElementById('detNews').innerHTML = html;
+        }
     } catch(e) {
         document.getElementById('detNews').innerHTML = `<span style="color:var(--muted)">Fallo de conexión con el feed de noticias.</span>`;
     }
